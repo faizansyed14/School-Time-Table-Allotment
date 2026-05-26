@@ -1,0 +1,32 @@
+# Render Blueprint — two services (API + static frontend)
+# Dashboard: New > Blueprint > connect repo, or add services manually using DEPLOY.md
+
+services:
+  - type: web
+    name: school-erp-api
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install && pip install -r requirements.txt
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: PYTHON
+        value: python3
+
+  - type: web
+    name: school-erp-web
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_URL
+        sync: false

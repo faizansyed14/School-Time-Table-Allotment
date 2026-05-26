@@ -1,0 +1,20 @@
+-- Seed 02: Subjects (synced from files/seed_subjects.sql)
+BEGIN;
+TRUNCATE TABLE subjects RESTART IDENTITY CASCADE;
+
+INSERT INTO subjects (name, periods_1a, periods_1b, periods_2a, periods_2b, periods_3a, periods_3b, periods_4a, periods_4b, periods_5, periods_6a, periods_6b, periods_7, periods_8, periods_9, periods_10) VALUES ('English', 9, 8, 8, 8, 9, 9, 9, 9, 8, 8, 8, 8, 8, 8, 8);
+INSERT INTO subjects (name, periods_1a, periods_1b, periods_2a, periods_2b, periods_3a, periods_3b, periods_4a, periods_4b, periods_5, periods_6a, periods_6b, periods_7, periods_8, periods_9, periods_10) VALUES ('Hindi', 8, 9, 9, 9, 8, 8, 8, 8, 7, 7, 7, 7, 7, 7, 7);
+INSERT INTO subjects (name, periods_1a, periods_1b, periods_2a, periods_2b, periods_3a, periods_3b, periods_4a, periods_4b, periods_5, periods_6a, periods_6b, periods_7, periods_8, periods_9, periods_10) VALUES ('Maths', 8, 9, 8, 8, 9, 9, 9, 9, 8, 8, 8, 8, 8, 9, 9);
+INSERT INTO subjects (name, periods_1a, periods_1b, periods_2a, periods_2b, periods_3a, periods_3b, periods_4a, periods_4b, periods_5, periods_6a, periods_6b, periods_7, periods_8, periods_9, periods_10) VALUES ('E.V.S', 6, 5, 6, 6, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+INSERT INTO subjects (name, periods_1a, periods_1b, periods_2a, periods_2b, periods_3a, periods_3b, periods_4a, periods_4b, periods_5, periods_6a, periods_6b, periods_7, periods_8, periods_9, periods_10) VALUES ('S.St', NULL, NULL, NULL, NULL, 6, 6, 6, 6, 6, 6, 6, 6, 6, 8, 8);
+INSERT INTO subjects (name, periods_1a, periods_1b, periods_2a, periods_2b, periods_3a, periods_3b, periods_4a, periods_4b, periods_5, periods_6a, periods_6b, periods_7, periods_8, periods_9, periods_10) VALUES ('Science', NULL, NULL, NULL, NULL, 6, 6, 6, 6, 6, 6, 6, 6, 6, 9, 9);
+INSERT INTO subjects (name, periods_1a, periods_1b, periods_2a, periods_2b, periods_3a, periods_3b, periods_4a, periods_4b, periods_5, periods_6a, periods_6b, periods_7, periods_8, periods_9, periods_10) VALUES ('G.K.', 3, 3, 3, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, NULL, NULL);
+INSERT INTO subjects (name, periods_1a, periods_1b, periods_2a, periods_2b, periods_3a, periods_3b, periods_4a, periods_4b, periods_5, periods_6a, periods_6b, periods_7, periods_8, periods_9, periods_10) VALUES ('Drawing', 3, 3, 3, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, NULL, NULL);
+INSERT INTO subjects (name, periods_1a, periods_1b, periods_2a, periods_2b, periods_3a, periods_3b, periods_4a, periods_4b, periods_5, periods_6a, periods_6b, periods_7, periods_8, periods_9, periods_10) VALUES ('Computer', 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, NULL, NULL);
+INSERT INTO subjects (name, periods_1a, periods_1b, periods_2a, periods_2b, periods_3a, periods_3b, periods_4a, periods_4b, periods_5, periods_6a, periods_6b, periods_7, periods_8, periods_9, periods_10) VALUES ('I.T.', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 6, 6);
+INSERT INTO subjects (name, periods_1a, periods_1b, periods_2a, periods_2b, periods_3a, periods_3b, periods_4a, periods_4b, periods_5, periods_6a, periods_6b, periods_7, periods_8, periods_9, periods_10) VALUES ('Sanskrit', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 4, 4, 4, 4, 4, NULL, NULL);
+INSERT INTO subjects (name, periods_1a, periods_1b, periods_2a, periods_2b, periods_3a, periods_3b, periods_4a, periods_4b, periods_5, periods_6a, periods_6b, periods_7, periods_8, periods_9, periods_10) VALUES ('Games', 2, 2, 2, 2, 2, 2, 2, 3, 2, 2, 2, 2, 2, 1, 1);
+INSERT INTO subjects (name, periods_1a, periods_1b, periods_2a, periods_2b, periods_3a, periods_3b, periods_4a, periods_4b, periods_5, periods_6a, periods_6b, periods_7, periods_8, periods_9, periods_10) VALUES ('Library', NULL, NULL, NULL, NULL, 1, 1, 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+INSERT INTO subjects (name, periods_1a, periods_1b, periods_2a, periods_2b, periods_3a, periods_3b, periods_4a, periods_4b, periods_5, periods_6a, periods_6b, periods_7, periods_8, periods_9, periods_10) VALUES ('Diary', 6, 6, 6, 6, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+
+COMMIT;

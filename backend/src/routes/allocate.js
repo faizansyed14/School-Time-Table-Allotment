@@ -31,6 +31,53 @@ function getStoredRules(raw) {
   return { R1: raw.rules?.R1 ?? true, R2: raw.rules?.R2 ?? true };
 }
 
+async function persistLastRun(lastRun) {
+  const { data: existing } = await supabase
+    .from('allocation_reports').select('report').eq('id', 1).maybeSingle();
+  const prev = existing?.report || {};
+  await supabase.from('allocation_reports').upsert({
+    id: 1,
+    report: { ...prev, lastRun },
+    generated_at: new Date().toISOString(),
+  });
+}
+
+function startPythonAllocator(timeLimitSeconds, inFile, outFile) {
+  const pyPath = path.join(BACKEND_DIR, 'scripts', 'allocator.py');
+  const py = spawn(getPythonCommand(), [
+    pyPath, '--input', inFile, '--output', outFile, '--time-limit', String(timeLimitSeconds),
+  ], { stdio: ['ignore', 'pipe', 'pipe'] });
+
+  allocatorRun.registerRun(py, timeLimitSeconds);
+
+  let stderr = '';
+  py.stderr.on('data', (b) => { stderr += b.toString(); });
+
+  py.on('close', async (code) => {
+    try {
+      if (allocatorRun.wasUserCancelled()) {
+        await persistLastRun({ success: false, cancelled: true, error: 'Allocation cancelled' });
+        return;
+      }
+      if (code !== 0) {
+        await persistLastRun({
+          success: false,
+          error: `Python exit ${code}: ${stderr.slice(0, 500)}`,
+        });
+        return;
+      }
+      const result = JSON.parse(await fs.readFile(outFile, 'utf-8'));
+      await persistLastRun(result);
+    } catch (e) {
+      await persistLastRun({ success: false, error: e.message });
+    }
+  });
+
+  py.on('error', async (e) => {
+    await persistLastRun({ success: false, error: e.message });
+  });
+}
+
 // GET last run result + rule flags
 router.get('/result', async (_req, res) => {
   const { data } = await supabase
@@ -62,7 +109,7 @@ router.post('/cancel', (_req, res) => {
   res.json({ cancelled });
 });
 
-// POST /run — build seed, run Python, return result
+// POST /run — build seed, start Python in background (202), poll /status + /result
 router.post('/run', async (req, res) => {
   const { timeLimitSeconds = 90 } = req.body || {};
 
@@ -128,46 +175,11 @@ router.post('/run', async (req, res) => {
     const outFile = path.join(tmpDir, '.cp_runtime_result.json');
     await fs.writeFile(inFile, JSON.stringify(seed, null, 2));
 
-    // 3. Run Python allocator
-    const pyPath = path.join(BACKEND_DIR, 'scripts', 'allocator.py');
-    const py = spawn(getPythonCommand(), [
-      pyPath, '--input', inFile, '--output', outFile, '--time-limit', String(timeLimitSeconds),
-    ], { stdio: ['ignore', 'pipe', 'pipe'] });
-
-    allocatorRun.registerRun(py, timeLimitSeconds);
-
-    let stderr = '';
-    py.stderr.on('data', (b) => { stderr += b.toString(); });
-
-    await new Promise((resolve, reject) => {
-      py.on('close', (code) => {
-        if (allocatorRun.wasUserCancelled()) {
-          return reject(new Error('Allocation cancelled'));
-        }
-        if (code === 0) return resolve();
-        reject(new Error(`Python ${code}: ${stderr.slice(0, 500)}`));
-      });
-      py.on('error', reject);
-    });
-
-    const result = JSON.parse(await fs.readFile(outFile, 'utf-8'));
-
-    // 4. Store report
-    const { data: existing } = await supabase
-      .from('allocation_reports').select('report').eq('id', 1).maybeSingle();
-    const prev = existing?.report || {};
-    await supabase.from('allocation_reports').upsert({
-      id: 1,
-      report: { ...prev, lastRun: result },
-      generated_at: new Date().toISOString(),
-    });
-
-    res.json(result);
+    startPythonAllocator(timeLimitSeconds, inFile, outFile);
+    res.status(202).json({ started: true, timeLimitSeconds });
   } catch (e) {
-    const cancelled = e.message === 'Allocation cancelled';
-    const status = cancelled ? 499 : 500;
     if (!res.writableEnded) {
-      res.status(status).json({ success: false, cancelled, error: e.message });
+      res.status(500).json({ success: false, error: e.message });
     }
   }
 });

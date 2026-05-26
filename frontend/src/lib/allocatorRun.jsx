@@ -100,6 +100,23 @@ export function AllocatorRunProvider({ children }) {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const waitForRunComplete = useCallback(() => new Promise((resolve, reject) => {
+    const tick = async () => {
+      try {
+        const s = await api.get('/allocate/status');
+        if (!s.running) {
+          const data = await api.get('/allocate/result').catch(() => null);
+          resolve(data?.lastRun ?? null);
+          return;
+        }
+        pollRef.current = setTimeout(tick, 2000);
+      } catch (e) {
+        reject(e);
+      }
+    };
+    tick();
+  }), []);
+
   const startRun = useCallback(async (opts = {}) => {
     if (phase === 'running') return null;
     const limit = opts.timeLimitSeconds ?? 90;
@@ -126,25 +143,46 @@ export function AllocatorRunProvider({ children }) {
         signal: ac.signal,
       });
       const data = await res.json().catch(() => ({}));
-      if (checkAuthResponse(res)) throw new Error('Session expired — please sign in again');
+      if (checkAuthResponse(res, { hadAuth: Boolean(getToken()) })) {
+        throw new Error('Session expired — please sign in again');
+      }
       if (res.status === 409) throw new Error(data.error || 'Allocator already running');
-      if (res.status === 499 || data.cancelled) {
+      if (!res.ok && res.status !== 202) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+
+      let run = data;
+      if (res.status === 202 || data.started) {
+        run = await waitForRunComplete();
+      }
+
+      if (run?.cancelled) {
         finishFromResult(null, null, true);
         return null;
       }
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      finishFromResult(data, null, false);
-      return data;
+      if (run && run.success === false) {
+        finishFromResult(null, run.error || 'Run failed', false);
+        return null;
+      }
+      if (run) {
+        finishFromResult(run, null, false);
+        return run;
+      }
+      finishFromResult(null, 'No result returned', false);
+      return null;
     } catch (e) {
       if (e.name === 'AbortError') {
         await api.post('/allocate/cancel').catch(() => {});
         finishFromResult(null, null, true);
         return null;
       }
-      finishFromResult(null, e.message, false);
+      const msg = e.message?.includes('Failed to fetch') || e.message?.includes('NetworkError')
+        ? 'Network error — API may be waking up or timed out. Wait and retry.'
+        : e.message;
+      finishFromResult(null, msg, false);
       return null;
     }
-  }, [phase, finishFromResult]);
+  }, [phase, finishFromResult, waitForRunComplete]);
 
   const requestCancel = useCallback(() => {
     if (phase === 'running') setShowCancelConfirm(true);

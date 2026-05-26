@@ -20,6 +20,8 @@ services:
         generateValue: true
       - key: PYTHON
         value: python3
+      - key: CORS_ORIGIN
+        sync: false
 
   - type: web
     name: school-erp-web

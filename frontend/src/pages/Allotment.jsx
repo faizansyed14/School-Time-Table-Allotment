@@ -76,6 +76,17 @@ export default function Allotment() {
     await api.patch('/allocate/rules', { rules: next }).catch(console.error);
   }
 
+  async function clearLastResult() {
+    try {
+      await api.delete('/allocate/result');
+      setLastRun(null);
+      setGenAt(null);
+      await loadState();
+    } catch (e) {
+      alert(e.message);
+    }
+  }
+
   async function runSolver() {
     setLastRun(null);
     const result = await startRun({ timeLimitSeconds: solverSeconds });
@@ -233,7 +244,7 @@ export default function Allotment() {
                 />
               </div>
               <p style={{ fontSize: 11, color: 'var(--mid)', marginTop: 6 }}>
-                Up to {timeLimitSeconds}s. You can switch pages — progress stays visible at the top.
+                Up to {timeLimitSeconds}s (queue classes, then optimize — same quality as before). You can switch pages.
               </p>
             </div>
           )}
@@ -251,6 +262,7 @@ export default function Allotment() {
                 <option value={90}>90 sec</option>
                 <option value={120}>120 sec (recommended on Render)</option>
                 <option value={180}>180 sec</option>
+                <option value={300}>300 sec (Render)</option>
               </select>
             </label>
           </div>
@@ -300,9 +312,17 @@ export default function Allotment() {
                 </div>
               ) : (
                 <div>
-                  <div className="alert alert-red" style={{ marginBottom: 10 }}>
-                    <AlertCircle size={13} />
-                    <b>{lastRun.solver_status_name || 'Failed'}</b>
+                  <div className="alert alert-red" style={{ marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+                    <span>
+                      <AlertCircle size={13} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+                      <b>{lastRun.solver_status_name || 'Failed'}</b>
+                      <span style={{ display: 'block', fontSize: 11, fontWeight: 400, marginTop: 4, opacity: 0.9 }}>
+                        Stored from a previous run. Clear it, then run again with 120–180s.
+                      </span>
+                    </span>
+                    <button type="button" className="btn btn-outline btn-sm" onClick={clearLastResult} disabled={isRunning}>
+                      Clear result
+                    </button>
                   </div>
                   {lastRun.message && (
                     <pre style={{ fontSize: 12, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, padding: 12, whiteSpace: 'pre-wrap', fontFamily: 'inherit', color: 'var(--dark)' }}>

@@ -43,11 +43,11 @@ async function persistLastRun(lastRun) {
 }
 
 function pythonEnv() {
-  return {
-    ...process.env,
-    ALLOCATOR_WORKERS: process.env.ALLOCATOR_WORKERS || '1',
-    ALLOCATOR_MAX_MEMORY_MB: process.env.ALLOCATOR_MAX_MEMORY_MB || '384',
-  };
+  const env = { ...process.env, ALLOCATOR_WORKERS: process.env.ALLOCATOR_WORKERS || '1' };
+  if (process.env.ALLOCATOR_MAX_MEMORY_MB) {
+    env.ALLOCATOR_MAX_MEMORY_MB = process.env.ALLOCATOR_MAX_MEMORY_MB;
+  }
+  return env;
 }
 
 function startPythonAllocator(timeLimitSeconds, inFile, outFile) {
@@ -106,6 +106,20 @@ router.patch('/rules', async (req, res) => {
   res.json({ rules: updated.rules });
 });
 
+// DELETE /result — clear stored lastRun (removes stale timeout errors from validation)
+router.delete('/result', async (_req, res) => {
+  const { data: existing } = await supabase
+    .from('allocation_reports').select('report').eq('id', 1).maybeSingle();
+  const prev = existing?.report || {};
+  const { lastRun: _removed, ...rest } = prev;
+  await supabase.from('allocation_reports').upsert({
+    id: 1,
+    report: { ...rest, rules: getStoredRules(prev) },
+    generated_at: new Date().toISOString(),
+  });
+  res.json({ cleared: true });
+});
+
 // GET /status — whether CP-SAT is still running (survives page navigation)
 router.get('/status', (_req, res) => {
   res.json(allocatorRun.getStatus());
@@ -119,7 +133,7 @@ router.post('/cancel', (_req, res) => {
 
 // POST /run — build seed, start Python in background (202), poll /status + /result
 router.post('/run', async (req, res) => {
-  const maxSec = parseInt(process.env.ALLOCATOR_MAX_TIME_SEC || '180', 10);
+  const maxSec = parseInt(process.env.ALLOCATOR_MAX_TIME_SEC || '300', 10);
   const requested = Number(req.body?.timeLimitSeconds) || 120;
   const timeLimitSeconds = Math.min(maxSec, Math.max(30, requested));
 

@@ -24,10 +24,8 @@ services:
         sync: false
       - key: ALLOCATOR_WORKERS
         value: "1"
-      - key: ALLOCATOR_MAX_MEMORY_MB
-        value: "384"
       - key: ALLOCATOR_MAX_TIME_SEC
-        value: "180"
+        value: "300"
 
   - type: web
     name: school-erp-web

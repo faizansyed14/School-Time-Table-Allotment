@@ -42,11 +42,19 @@ async function persistLastRun(lastRun) {
   });
 }
 
+function pythonEnv() {
+  return {
+    ...process.env,
+    ALLOCATOR_WORKERS: process.env.ALLOCATOR_WORKERS || '1',
+    ALLOCATOR_MAX_MEMORY_MB: process.env.ALLOCATOR_MAX_MEMORY_MB || '384',
+  };
+}
+
 function startPythonAllocator(timeLimitSeconds, inFile, outFile) {
   const pyPath = path.join(BACKEND_DIR, 'scripts', 'allocator.py');
   const py = spawn(getPythonCommand(), [
     pyPath, '--input', inFile, '--output', outFile, '--time-limit', String(timeLimitSeconds),
-  ], { stdio: ['ignore', 'pipe', 'pipe'] });
+  ], { stdio: ['ignore', 'pipe', 'pipe'], env: pythonEnv() });
 
   allocatorRun.registerRun(py, timeLimitSeconds);
 

@@ -22,6 +22,10 @@ services:
         value: python3
       - key: CORS_ORIGIN
         sync: false
+      - key: ALLOCATOR_WORKERS
+        value: "1"
+      - key: ALLOCATOR_MAX_MEMORY_MB
+        value: "384"
 
   - type: web
     name: school-erp-web
@@ -29,10 +33,7 @@ services:
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: dist
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
+    # SPA routing: use frontend/public/_redirects (must not rewrite /assets/*)
     envVars:
       - key: VITE_API_URL
         sync: false

@@ -9,7 +9,7 @@ Usage:
     python3 auto_generate_allocations.py --in input.json --out output.json
 """
 from __future__ import annotations
-import argparse, json, sys
+import argparse, json, os, sys
 from collections import defaultdict
 from pathlib import Path
 from ortools.sat.python import cp_model
@@ -200,7 +200,11 @@ def solve(data, required):
 
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = 60.0
-    solver.parameters.num_search_workers = 8
+    workers = max(1, int(os.environ.get("ALLOCATOR_WORKERS", "1")))
+    solver.parameters.num_search_workers = workers
+    mem_mb = os.environ.get("ALLOCATOR_MAX_MEMORY_MB")
+    if mem_mb:
+        solver.parameters.max_memory_in_mb = max(128, int(mem_mb))
     status = solver.solve(model)
 
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):

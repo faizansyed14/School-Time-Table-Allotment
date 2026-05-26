@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from collections import defaultdict
 from pathlib import Path
 
@@ -464,7 +465,12 @@ class TimetableCPSolver:
 
         solver = cp_model.CpSolver()
         solver.parameters.max_time_in_seconds = float(time_limit_seconds)
-        solver.parameters.num_search_workers = 8
+        # Render free tier = 512MB RAM; 8 workers often OOM-kills the whole service.
+        workers = max(1, int(os.environ.get("ALLOCATOR_WORKERS", "1")))
+        solver.parameters.num_search_workers = workers
+        mem_mb = os.environ.get("ALLOCATOR_MAX_MEMORY_MB")
+        if mem_mb:
+            solver.parameters.max_memory_in_mb = max(128, int(mem_mb))
 
         status = solver.solve(model)
         status_name = solver.status_name(status)

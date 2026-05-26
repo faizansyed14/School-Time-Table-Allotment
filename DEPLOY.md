@@ -66,12 +66,13 @@ After deploy, note the URL, e.g. `https://school-erp-api.onrender.com`.
 
 **SPA routing (fixes refresh 404 on `/dashboard`, `/login`, etc.):**
 
-1. **Render dashboard** → static site → **Redirects/Rewrites** → **Add rule**:
-   - **Source:** `/*`
-   - **Destination:** `/index.html`
-   - **Action:** **Rewrite** (not Redirect 301)
+1. **Render dashboard** → static site → **Redirects/Rewrites**:
+   - **Remove** any rule that rewrites `/*` → `/index.html` only (that breaks `/assets/*.js` → blank app / 404).
+   - Use repo `frontend/public/_redirects` (copied to `dist/` on build) — it rewrites SPA routes but **not** `/assets/*`.
 
-2. **Redeploy** frontend after pull — `frontend/public/_redirects` is copied into `dist/` on build.
+2. **Redeploy** frontend (clear build cache if offered). **Hard refresh** browser (Ctrl+Shift+R) so `index.html` matches new JS hash.
+
+3. **Publish directory** must be `dist`, **Root directory** `frontend`, build: `npm install && npm run build`.
 
 To verify: after deploy, open `https://YOUR-FRONTEND.onrender.com/dashboard` in a new tab — should load the app, not “Not Found”.
 
@@ -115,5 +116,6 @@ Repo includes `render.yaml`. In Render: **New → Blueprint** → connect repo �
 
 - **CORS / failed fetch:** `VITE_API_URL` must match backend URL exactly (https, no trailing `/`).
 - **502 / CORS on allotment:** Usually the solver ran longer than the HTTP connection. Deploy latest code (allotment returns **202** immediately, then polls `/allocate/status`). Also set `CORS_ORIGIN` to your frontend URL. Free tier: first run can take 1–2 minutes — keep UptimeRobot pinging the API.
+- **OOM “used over 512MB” on allotment:** CP-SAT used too much RAM. Latest code sets `ALLOCATOR_WORKERS=1` and `ALLOCATOR_MAX_MEMORY_MB=384` on the API service. Add those env vars on Render if missing, redeploy API. If it still OOMs, upgrade the API to **Starter** (more RAM) or run allotment locally against the same Supabase DB.
 - **Python not found:** Set `PYTHON=python3` on the backend service.
 - **Login fails:** Run `database/patches/02_fix_admin_password.sql` in Supabase.

@@ -18,6 +18,12 @@ app.use('/api/allocations',require('./routes/allocations'));
 app.use('/api/allocate',   require('./routes/allocate'));
 
 // ── Health check ─────────────────────────────────────────────
+app.get('/', (_req, res) => res.json({
+  service: 'school-erp-api',
+  status: 'ok',
+  health: '/api/health',
+  hint: 'Use the static frontend site; API base is /api/...',
+}));
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
 
 // ── Start ─────────────────────────────────────────────────────

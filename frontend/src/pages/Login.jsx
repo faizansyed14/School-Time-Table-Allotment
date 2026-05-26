@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth.jsx';
+import { apiUrl } from '../lib/api.js';
 import { GraduationCap, Loader } from 'lucide-react';
 
 export default function Login() {
@@ -23,12 +24,12 @@ export default function Login() {
       return;
     }
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch(apiUrl('/auth/login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Login failed');
       login(data.token, data.username);
       navigate('/dashboard', { replace: true });

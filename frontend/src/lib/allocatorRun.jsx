@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { api, getToken } from './api.js';
+import { api, apiUrl, getToken } from './api.js';
+import { checkAuthResponse } from './session.js';
 
 const AllocatorRunContext = createContext(null);
 
@@ -115,7 +116,7 @@ export function AllocatorRunProvider({ children }) {
     setShowCancelConfirm(false);
 
     try {
-      const res = await fetch('/api/allocate/run', {
+      const res = await fetch(apiUrl('/allocate/run'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -125,6 +126,7 @@ export function AllocatorRunProvider({ children }) {
         signal: ac.signal,
       });
       const data = await res.json().catch(() => ({}));
+      if (checkAuthResponse(res)) throw new Error('Session expired — please sign in again');
       if (res.status === 409) throw new Error(data.error || 'Allocator already running');
       if (res.status === 499 || data.cancelled) {
         finishFromResult(null, null, true);

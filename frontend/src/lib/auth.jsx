@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { registerSessionClear, clearStoredSession, isTokenExpired } from './session.js';
 
 const AuthContext = createContext(null);
 
@@ -7,9 +8,14 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    registerSessionClear(() => setUser(null));
     const token = localStorage.getItem('erp_token');
     const name  = localStorage.getItem('erp_username');
-    if (token && name) setUser({ token, username: name });
+    if (token && name && !isTokenExpired(token)) {
+      setUser({ token, username: name });
+    } else if (token) {
+      clearStoredSession();
+    }
     setLoading(false);
   }, []);
 

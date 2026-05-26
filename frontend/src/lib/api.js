@@ -55,9 +55,8 @@ export async function loginApi(username, password) {
   }
 
   const data = await res.json().catch(() => ({}));
-  if (checkAuthResponse(res)) throw new Error('Session expired — please sign in again');
   if (!res.ok) {
-    throw new Error(data.error || `Login failed (HTTP ${res.status}). Request: ${url}`);
+    throw new Error(data.error || `Login failed (HTTP ${res.status})`);
   }
   return data;
 }
@@ -73,7 +72,9 @@ async function request(method, path, body) {
   if (body !== undefined) opts.body = JSON.stringify(body);
   const res = await fetch(apiUrl(path.startsWith('/') ? path : `/${path}`), opts);
   const data = await res.json().catch(() => ({}));
-  if (checkAuthResponse(res)) throw new Error('Session expired — please sign in again');
+  if (checkAuthResponse(res, { hadAuth: Boolean(token()) })) {
+    throw new Error('Session expired — please sign in again');
+  }
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
 }

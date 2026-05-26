@@ -15,8 +15,11 @@ router.post('/login', async (req, res) => {
     .eq('username', username)
     .single();
 
-  if (error || !data)
+  if (error) {
+    console.error('[auth/login] supabase:', error.message);
     return res.status(401).json({ error: 'Invalid credentials' });
+  }
+  if (!data) return res.status(401).json({ error: 'Invalid credentials' });
 
   const match = await bcrypt.compare(password, data.password_hash);
   if (!match) return res.status(401).json({ error: 'Invalid credentials' });

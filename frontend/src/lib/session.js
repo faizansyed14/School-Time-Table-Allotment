@@ -27,9 +27,13 @@ export function handleUnauthorized() {
   else window.location.replace('/login');
 }
 
-/** @returns {boolean} true if session was cleared (caller should stop) */
-export function checkAuthResponse(res) {
+/**
+ * Expired/invalid Bearer token on protected routes — clear session and redirect.
+ * @param {boolean} hadAuth — pass false for login (401 = bad password, not session expiry)
+ * @returns {boolean}
+ */
+export function checkAuthResponse(res, { hadAuth = true } = {}) {
   if (res.status !== 401) return false;
-  handleUnauthorized();
+  if (hadAuth) handleUnauthorized();
   return true;
 }

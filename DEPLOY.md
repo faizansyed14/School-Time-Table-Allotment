@@ -69,7 +69,9 @@ After deploy, note the URL, e.g. `https://school-erp-api.onrender.com`.
 |-----|--------|
 | `VITE_API_URL` | `https://school-erp-api.onrender.com` (your backend URL, **no** trailing slash) |
 
-Redeploy frontend after changing `VITE_API_URL`.
+Redeploy frontend after changing `VITE_API_URL` (required at **build** time — changing env alone without redeploy does nothing).
+
+**Quick fallback:** edit `frontend/public/config.js` and set `window.__ERP_API_URL__ = 'https://your-api.onrender.com'`, then redeploy.
 
 ---
 

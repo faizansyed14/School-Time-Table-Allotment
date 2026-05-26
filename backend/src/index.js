@@ -6,6 +6,13 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+app.use((err, req, res, next) => {
+  if (err.type === 'entity.parse.failed' || (err instanceof SyntaxError && err.status === 400 && 'body' in err)) {
+    return res.status(400).json({ error: 'Invalid JSON in request body' });
+  }
+  next(err);
+});
+
 // ── Routes ───────────────────────────────────────────────────
 app.use('/api/auth',       require('./routes/auth'));
 app.use('/api/dashboard',  require('./routes/dashboard'));

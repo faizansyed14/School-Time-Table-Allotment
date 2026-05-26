@@ -3,13 +3,45 @@ import { checkAuthResponse } from './session.js';
 export function getToken() { return localStorage.getItem('erp_token') || ''; }
 function token() { return getToken(); }
 
-/** Set on Render static site: VITE_API_URL=https://your-api.onrender.com (no trailing slash) */
-const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+/** Render static site: VITE_API_URL=https://your-api.onrender.com (no trailing slash) */
+export function getApiBase() {
+  const fromEnv = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+  if (fromEnv) return fromEnv;
+  if (typeof window !== 'undefined' && window.__ERP_API_URL__) {
+    return String(window.__ERP_API_URL__).replace(/\/$/, '');
+  }
+  return '';
+}
 
 /** Full URL for /api/... — use for fetch() outside api.* helpers */
 export function apiUrl(path) {
   const p = path.startsWith('/api') ? path : `/api${path.startsWith('/') ? path : `/${path}`}`;
-  return `${API_BASE}${p}`;
+  return `${getApiBase()}${p}`;
+}
+
+export function apiConfigError() {
+  if (import.meta.env.DEV) return null;
+  if (getApiBase()) return null;
+  return 'API URL not set. On Render static site add VITE_API_URL (your backend URL) and redeploy.';
+}
+
+/** Login — no Bearer header; body must be JSON string */
+export async function loginApi(username, password) {
+  const cfgErr = apiConfigError();
+  if (cfgErr) throw new Error(cfgErr);
+
+  const res = await fetch(apiUrl('/auth/login'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: String(username),
+      password: String(password),
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (checkAuthResponse(res)) throw new Error('Session expired — please sign in again');
+  if (!res.ok) throw new Error(data.error || `Login failed (HTTP ${res.status})`);
+  return data;
 }
 
 async function request(method, path, body) {

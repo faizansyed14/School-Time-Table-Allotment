@@ -119,7 +119,9 @@ router.post('/cancel', (_req, res) => {
 
 // POST /run — build seed, start Python in background (202), poll /status + /result
 router.post('/run', async (req, res) => {
-  const { timeLimitSeconds = 90 } = req.body || {};
+  const maxSec = parseInt(process.env.ALLOCATOR_MAX_TIME_SEC || '180', 10);
+  const requested = Number(req.body?.timeLimitSeconds) || 120;
+  const timeLimitSeconds = Math.min(maxSec, Math.max(30, requested));
 
   if (allocatorRun.isRunning()) {
     return res.status(409).json({ error: 'Allocator is already running' });

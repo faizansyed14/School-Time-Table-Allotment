@@ -25,6 +25,9 @@ export default function Allotment() {
   const [allotment, setAllotment] = useState(null);
   const [showSummary, setShowSummary] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
+  const [solverSeconds, setSolverSeconds] = useState(
+    () => Number(import.meta.env.VITE_ALLOTMENT_TIME_SEC) || (import.meta.env.PROD ? 120 : 90),
+  );
   const navigate = useNavigate();
 
   const loadSummary = useCallback(async () => {
@@ -75,7 +78,7 @@ export default function Allotment() {
 
   async function runSolver() {
     setLastRun(null);
-    const result = await startRun({ timeLimitSeconds: 90 });
+    const result = await startRun({ timeLimitSeconds: solverSeconds });
     if (result) {
       setLastRun(result);
       if (result.success) {
@@ -165,8 +168,9 @@ export default function Allotment() {
                     {issue.actions?.length > 0 && (
                       <div className="issue-actions" style={{ marginTop: 6 }}>
                         {issue.actions.map((act, j) => (
-                          <a key={j} href={act.link || '#'} className="issue-action-btn"
-                             style={{ color: 'var(--red)', borderColor: '#fca5a5', fontSize: 11 }}>
+                          <a key={j} href="#" className="issue-action-btn"
+                             style={{ color: 'var(--red)', borderColor: '#fca5a5', fontSize: 11 }}
+                             onClick={(e) => { e.preventDefault(); if (act.link) navigate(act.link); }}>
                             {act.page} → {act.label}
                           </a>
                         ))}
@@ -234,6 +238,23 @@ export default function Allotment() {
             </div>
           )}
 
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
+            <label style={{ fontSize: 12, color: 'var(--mid)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              Time limit
+              <select
+                className="form-input"
+                style={{ width: 'auto', padding: '4px 8px' }}
+                value={solverSeconds}
+                disabled={isRunning}
+                onChange={(e) => setSolverSeconds(Number(e.target.value))}
+              >
+                <option value={90}>90 sec</option>
+                <option value={120}>120 sec (recommended on Render)</option>
+                <option value={180}>180 sec</option>
+              </select>
+            </label>
+          </div>
+
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: lastRun ? 16 : 0, flexWrap: 'wrap' }}>
             <button className="btn btn-primary" onClick={runSolver} disabled={!canRun || isRunning} style={{ minWidth: 180 }}>
               {isRunning
@@ -295,12 +316,16 @@ export default function Allotment() {
                           <span style={{ fontSize: 12 }}>{f.reason}</span>
                           {f.actions?.length > 0 && (
                             <div className="issue-actions" style={{ marginTop: 6 }}>
-                              {f.actions.map((act, j) => (
-                                <a key={j} href={act.link || (act.page === 'Teachers' ? '/teachers' : act.page === 'Allocations' ? '/allocations' : '#')}
-                                   className="issue-action-btn" style={{ color: 'var(--red)', borderColor: '#fca5a5', fontSize: 11 }}>
+                              {f.actions.map((act, j) => {
+                                const link = act.link || (act.page === 'Teachers' ? '/teachers' : act.page === 'Allocations' ? '/allocations' : null);
+                                return (
+                                <a key={j} href="#" className="issue-action-btn"
+                                   style={{ color: 'var(--red)', borderColor: '#fca5a5', fontSize: 11 }}
+                                   onClick={(e) => { e.preventDefault(); if (link) navigate(link); }}>
                                   {act.page} → {act.action}
                                 </a>
-                              ))}
+                                );
+                              })}
                             </div>
                           )}
                         </div>

@@ -64,17 +64,11 @@ After deploy, note the URL, e.g. `https://school-erp-api.onrender.com`.
 | **Build Command** | `npm install && npm run build` |
 | **Publish Directory** | `dist` |
 
-**SPA routing (fixes refresh 404 on `/dashboard`, `/login`, etc.):**
+**SPA routing / refresh:** App uses **hash URLs** (`/#/dashboard`, `/#/allotment`). Refresh keeps the same page. Build copies `index.html` → `404.html` for Render.
 
-1. **Render dashboard** → static site → **Redirects/Rewrites**:
-   - **Remove** any rule that rewrites `/*` → `/index.html` only (that breaks `/assets/*.js` → blank app / 404).
-   - Use repo `frontend/public/_redirects` (copied to `dist/` on build) — it rewrites SPA routes but **not** `/assets/*`.
+**Remove** any manual Render redirect `/*` → `/index.html` (it breaks `/assets/*.js`).
 
-2. **Redeploy** frontend (clear build cache if offered). **Hard refresh** browser (Ctrl+Shift+R) so `index.html` matches new JS hash.
-
-3. **Publish directory** must be `dist`, **Root directory** `frontend`, build: `npm install && npm run build`.
-
-To verify: after deploy, open `https://YOUR-FRONTEND.onrender.com/dashboard` in a new tab — should load the app, not “Not Found”.
+Redeploy frontend; use links like `https://YOUR-FRONTEND.onrender.com/#/allotment`.
 
 **Environment variable (required):**
 

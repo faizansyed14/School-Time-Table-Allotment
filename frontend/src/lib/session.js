@@ -24,7 +24,7 @@ export function isTokenExpired(token) {
 export function handleUnauthorized() {
   clearStoredSession();
   if (onSessionCleared) onSessionCleared();
-  else window.location.replace('/login');
+  else window.location.replace('/#/login');
 }
 
 /**

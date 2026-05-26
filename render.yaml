@@ -26,6 +26,8 @@ services:
         value: "1"
       - key: ALLOCATOR_MAX_MEMORY_MB
         value: "384"
+      - key: ALLOCATOR_MAX_TIME_SEC
+        value: "180"
 
   - type: web
     name: school-erp-web
@@ -37,3 +39,5 @@ services:
     envVars:
       - key: VITE_API_URL
         sync: false
+      - key: VITE_ALLOTMENT_TIME_SEC
+        value: "120"

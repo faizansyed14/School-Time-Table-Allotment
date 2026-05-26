@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './lib/auth.jsx';
 import { AllocatorRunProvider } from './lib/allocatorRun.jsx';
 import { BalanceReminderProvider } from './lib/balanceReminder.jsx';
@@ -27,7 +27,7 @@ function Guard({ children }) {
 export default function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
+      <HashRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/" element={<Guard><BalanceReminderProvider><AllocatorRunProvider><Layout /></AllocatorRunProvider></BalanceReminderProvider></Guard>}>
@@ -43,7 +43,7 @@ export default function App() {
           </Route>
           <Route path="*" element={<Navigate to="/guide" replace />} />
         </Routes>
-      </BrowserRouter>
+      </HashRouter>
     </AuthProvider>
   );
 }

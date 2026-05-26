@@ -63,6 +63,14 @@ After deploy, note the URL, e.g. `https://school-erp-api.onrender.com`.
 | **Build Command** | `npm install && npm run build` |
 | **Publish Directory** | `dist` |
 
+**SPA routing (fixes `/login` 404):** In Render → static site → **Redirects/Rewrites**, add:
+
+| Source | Destination |
+|--------|-------------|
+| `/*` | `/index.html` |
+
+Or redeploy after pull — repo includes `frontend/public/_redirects` and `render.yaml` routes.
+
 **Environment variable (required):**
 
 | Key | Value |

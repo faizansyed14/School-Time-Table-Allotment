@@ -30,17 +30,35 @@ export async function loginApi(username, password) {
   const cfgErr = apiConfigError();
   if (cfgErr) throw new Error(cfgErr);
 
-  const res = await fetch(apiUrl('/auth/login'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      username: String(username),
-      password: String(password),
-    }),
-  });
+  const url = apiUrl('/auth/login');
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 90000);
+
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: String(username),
+        password: String(password),
+      }),
+      signal: ac.signal,
+    });
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      throw new Error('API timed out (Render free tier may be waking up). Wait 1 minute and try again.');
+    }
+    throw new Error(`Cannot reach API at ${url}. Check VITE_API_URL and that the backend is live.`);
+  } finally {
+    clearTimeout(timer);
+  }
+
   const data = await res.json().catch(() => ({}));
   if (checkAuthResponse(res)) throw new Error('Session expired — please sign in again');
-  if (!res.ok) throw new Error(data.error || `Login failed (HTTP ${res.status})`);
+  if (!res.ok) {
+    throw new Error(data.error || `Login failed (HTTP ${res.status}). Request: ${url}`);
+  }
   return data;
 }
 

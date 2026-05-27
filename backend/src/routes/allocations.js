@@ -119,6 +119,8 @@ router.get('/validate', async (_req, res) => {
   res.json(result);
 });
 
+const { autoGenerateAllocations } = require('../lib/autoGenerator');
+
 // ── POST /auto-generate ───────────────────────────────────────
 // Reads live DB: subjects (curriculum), teachers (targets + subjects + levels), classes (class teachers).
 // Does NOT read existing subject_allocations. On apply=1, replaces all allocation rows.
@@ -134,43 +136,35 @@ router.post('/auto-generate', async (req, res) => {
     if (classesRes.error)  throw new Error(classesRes.error.message);
     if (subjectsRes.error) throw new Error(subjectsRes.error.message);
 
-    const inFile  = path.join(BACKEND_DIR, '.autogen_input.json');
-    const outFile = path.join(BACKEND_DIR, '.autogen_output.json');
-
-    await fs.writeFile(inFile, JSON.stringify({
+    const result = autoGenerateAllocations({
       teachers: teachersRes.data || [],
       classes:  classesRes.data  || [],
       subjects: subjectsRes.data || [],
-    }, null, 2));
-
-    const pyPath = path.join(SCRIPTS_DIR, 'autoGenerate.py');
-    const py = spawn(getPythonCommand(), [pyPath, '--in', inFile, '--out', outFile], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    let stderr = '';
-    py.stderr.on('data', (b) => { stderr += b.toString(); });
-    await new Promise((resolve, reject) => {
-      py.on('close', (code) => code === 0 ? resolve() : reject(new Error(`Python ${code}: ${stderr}`)));
-      py.on('error', reject);
     });
 
-    const result = JSON.parse(await fs.readFile(outFile, 'utf-8'));
     if (!result.success) return res.json({ success: false, errors: result.errors, warnings: result.warnings });
 
     if (apply) {
+      // Clear existing allocations
       await supabase.from('subject_allocations').delete().neq('teacher_id', '00000000-0000-0000-0000-000000000000');
+      
+      // Insert new allocations in batches
       for (let i = 0; i < result.allocations.length; i += 100) {
-        const { error } = await supabase.from('subject_allocations').insert(result.allocations.slice(i, i + 100));
+        const batch = result.allocations.slice(i, i + 100);
+        const { error } = await supabase.from('subject_allocations').insert(batch);
         if (error) throw new Error(error.message);
       }
     }
 
     res.json({
-      success: true, applied: apply, count: result.allocations.length,
+      success: true, 
+      applied: apply, 
+      count: result.allocations.length,
       warnings: result.warnings,
       allocations: apply ? undefined : result.allocations,
     });
   } catch (e) {
+    console.error('[AUTO-GENERATE] Error:', e.message);
     res.status(500).json({ success: false, error: e.message });
   }
 });

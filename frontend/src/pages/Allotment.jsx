@@ -1,33 +1,19 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
-import { useAllocatorRun } from '../lib/allocatorRun.jsx';
-import { Play, Check, AlertCircle, Loader, ArrowRight, RefreshCw, CheckCircle, BarChart2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Play, Check, AlertCircle, Loader, ArrowRight, RefreshCw, CheckCircle, BarChart2, ChevronDown, ChevronUp, Zap, Clock } from 'lucide-react';
 import AllotmentSummaryPanel from '../components/AllotmentSummaryPanel.jsx';
 
 export default function Allotment() {
-  const {
-    isRunning,
-    progress,
-    secondsRemaining,
-    timeLimitSeconds,
-    startRun,
-    requestCancel,
-    lastRun: ctxLastRun,
-    phase,
-  } = useAllocatorRun();
-
-  const [rules, setRules]       = useState({ R1: true, R2: true });
-  const [lastRun, setLastRun]   = useState(null);
-  const [genAt, setGenAt]       = useState(null);
+  const [rules, setRules] = useState({ R1: true, R2: true });
+  const [lastRun, setLastRun] = useState(null);
+  const [genAt, setGenAt] = useState(null);
+  const [running, setRunning] = useState(false);
   const [applying, setApplying] = useState(false);
   const [validation, setValidation] = useState(null);
   const [allotment, setAllotment] = useState(null);
   const [showSummary, setShowSummary] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
-  const [solverSeconds, setSolverSeconds] = useState(
-    () => Number(import.meta.env.VITE_ALLOTMENT_TIME_SEC) || (import.meta.env.PROD ? 120 : 90),
-  );
   const navigate = useNavigate();
 
   const loadSummary = useCallback(async () => {
@@ -58,24 +44,6 @@ export default function Allotment() {
 
   useEffect(() => { loadState(); }, [loadState]);
 
-  useEffect(() => {
-    if (phase === 'done' || phase === 'error') setLastRun(ctxLastRun);
-    if (phase === 'cancelled') setLastRun(null);
-  }, [phase, ctxLastRun]);
-
-  useEffect(() => {
-    if (phase === 'done' && ctxLastRun?.success) {
-      setShowSummary(true);
-      loadSummary();
-    }
-  }, [phase, ctxLastRun?.success, loadSummary]);
-
-  async function toggleRule(key) {
-    const next = { ...rules, [key]: !rules[key] };
-    setRules(next);
-    await api.patch('/allocate/rules', { rules: next }).catch(console.error);
-  }
-
   async function clearLastResult() {
     try {
       await api.delete('/allocate/result');
@@ -88,16 +56,21 @@ export default function Allotment() {
   }
 
   async function runSolver() {
+    setRunning(true);
     setLastRun(null);
-    const result = await startRun({ timeLimitSeconds: solverSeconds });
-    if (result) {
+    try {
+      const result = await api.post('/allocate/run');
       setLastRun(result);
       if (result.success) {
         setShowSummary(true);
         await loadSummary();
       }
+      await loadState();
+    } catch (e) {
+      alert(`Engine error: ${e.message}`);
+    } finally {
+      setRunning(false);
     }
-    await loadState();
   }
 
   async function applyTimetable() {
@@ -119,14 +92,14 @@ export default function Allotment() {
   }
 
   const criticalIssues = (allotment?.issues || validation?.issues || []).filter((i) => i.severity === 'error');
-  const canRun = criticalIssues.length === 0 && !isRunning;
+  const canRun = criticalIssues.length === 0 && !running;
 
   return (
     <div>
       <div className="page-header">
         <div>
           <h2>Allotment</h2>
-          <p>Configure rules and run the CP-SAT timetable solver.</p>
+          <p>Generate the complete school timetable using the built-in engine.</p>
         </div>
         <button type="button" className="btn btn-outline" onClick={toggleSummary}>
           <BarChart2 size={14} />
@@ -180,8 +153,8 @@ export default function Allotment() {
                       <div className="issue-actions" style={{ marginTop: 6 }}>
                         {issue.actions.map((act, j) => (
                           <a key={j} href="#" className="issue-action-btn"
-                             style={{ color: 'var(--red)', borderColor: '#fca5a5', fontSize: 11 }}
-                             onClick={(e) => { e.preventDefault(); if (act.link) navigate(act.link); }}>
+                            style={{ color: 'var(--red)', borderColor: '#fca5a5', fontSize: 11 }}
+                            onClick={(e) => { e.preventDefault(); if (act.link) navigate(act.link); }}>
                             {act.page} → {act.label}
                           </a>
                         ))}
@@ -197,26 +170,14 @@ export default function Allotment() {
           </div>
         </div>
 
-        {/* Rules */}
+        {/* Rules (always-on info) */}
         <div className="card">
-          <div className="card-header"><span style={{ fontWeight: 600, fontSize: 14 }}>Timetable Rules</span></div>
-          <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <RuleRow
-              label="R1 — Class Teacher at Period 1"
-              hint="Class teacher must teach the first period of the day in their class."
-              on={rules.R1}
-              onToggle={() => toggleRule('R1')}
-            />
-            <RuleRow
-              label="R2 — Diary at Period 8 (Classes 1–2)"
-              hint="Last period of the day must be Diary for Classes 1A, 1B, 2A, 2B."
-              on={rules.R2}
-              onToggle={() => toggleRule('R2')}
-            />
-            <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10, fontSize: 12, color: 'var(--mid)' }}>
-              <div>R5 — Max 2 same subject per day: <b style={{ color: 'var(--dark)' }}>Always on</b></div>
-              <div>R6 — Games not in last period: <b style={{ color: 'var(--dark)' }}>Always on</b></div>
-            </div>
+          <div className="card-header"><span style={{ fontWeight: 600, fontSize: 14 }}>Timetable Rules (Always Active)</span></div>
+          <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <RuleInfo label="R1 — Class Teacher at Period 1" hint="Class teacher teaches the first period of the day in their class, every day." />
+            <RuleInfo label="R2 — Diary at Period 8 (Classes 1–2)" hint="Last period = Diary for Classes 1A, 1B, 2A, 2B." />
+            <RuleInfo label="R3 — No Teacher Conflicts" hint="A teacher can only be in one class at any given day+period." />
+            <RuleInfo label="R4 — Teacher Period Restriction" hint="Each teacher's 'Starts from' setting is respected (set in Teacher page)." />
           </div>
         </div>
       </div>
@@ -231,76 +192,62 @@ export default function Allotment() {
             </div>
           )}
 
-          {isRunning && (
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--mid)', marginBottom: 6 }}>
-                <span>Solver running… ~{secondsRemaining}s remaining</span>
-                <span>{progress}%</span>
-              </div>
-              <div className="progress-bar-wrap">
-                <div
-                  className="progress-bar-fill"
-                  style={{ width: `${progress}%`, background: 'var(--blue)', transition: 'width 0.25s ease' }}
-                />
-              </div>
-              <p style={{ fontSize: 11, color: 'var(--mid)', marginTop: 6 }}>
-                Up to {timeLimitSeconds}s (queue classes, then optimize — same quality as before). You can switch pages.
-              </p>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: lastRun ? 16 : 0, flexWrap: 'wrap' }}>
+            <button className="btn btn-primary" onClick={runSolver} disabled={!canRun || running} style={{ minWidth: 200 }}>
+              {running
+                ? <><Loader size={13} className="spinner" /> Generating…</>
+                : <><Zap size={13} /> Generate Timetable</>}
+            </button>
+          </div>
+
+          {running && (
+            <div style={{ marginTop: 12, fontSize: 12, color: 'var(--mid)' }}>
+              <Loader size={12} className="spinner" style={{ verticalAlign: 'middle', marginRight: 6 }} />
+              Engine is running… this takes about 2-5 seconds.
             </div>
           )}
-
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
-            <label style={{ fontSize: 12, color: 'var(--mid)', display: 'flex', alignItems: 'center', gap: 8 }}>
-              Time limit
-              <select
-                className="form-input"
-                style={{ width: 'auto', padding: '4px 8px' }}
-                value={solverSeconds}
-                disabled={isRunning}
-                onChange={(e) => setSolverSeconds(Number(e.target.value))}
-              >
-                <option value={90}>90 sec</option>
-                <option value={120}>120 sec (recommended on Render)</option>
-                <option value={180}>180 sec</option>
-                <option value={300}>300 sec (Render)</option>
-              </select>
-            </label>
-          </div>
-
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: lastRun ? 16 : 0, flexWrap: 'wrap' }}>
-            <button className="btn btn-primary" onClick={runSolver} disabled={!canRun || isRunning} style={{ minWidth: 180 }}>
-              {isRunning
-                ? <><Loader size={13} className="spinner" /> Running…</>
-                : <><Play size={13} /> Run Allocator</>}
-            </button>
-            {isRunning && (
-              <button type="button" className="btn btn-outline" onClick={requestCancel}>
-                Cancel run
-              </button>
-            )}
-          </div>
 
           {/* Result */}
           {lastRun && (
             <div style={{ marginTop: 16 }}>
               {lastRun.success ? (
                 <div>
-                  <div className="alert alert-green" style={{ marginBottom: 14 }}>
-                    <CheckCircle size={13} />
-                    <b>FEASIBLE — {lastRun.filled}/{lastRun.total} slots filled</b>
-                    {genAt && <span style={{ marginLeft: 8, fontSize: 11 }}>at {new Date(genAt).toLocaleTimeString('en-IN')}</span>}
+                  <div className="alert alert-green" style={{ marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <CheckCircle size={13} />
+                      <b>COMPLETE — {lastRun.filled}/{lastRun.total} slots filled</b>
+                      {genAt && <span style={{ marginLeft: 8, fontSize: 11, opacity: 0.8 }}>at {new Date(genAt).toLocaleTimeString('en-IN')}</span>}
+                    </div>
+                    {lastRun.elapsed_ms != null && (
+                      <div style={{
+                        background: 'rgba(52, 211, 153, 0.2)',
+                        padding: '2px 8px',
+                        borderRadius: 4,
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: '#065f46',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                      }}>
+                        <Clock size={10} />
+                        {lastRun.elapsed_ms}ms
+                      </div>
+                    )}
                   </div>
-                  {lastRun.preflight_issues?.warn?.length > 0 && (
+
+                  {lastRun.warnings?.length > 0 && (
                     <div className="alert alert-amber" style={{ marginBottom: 14 }}>
                       <AlertCircle size={13} />
                       <div>
-                        {lastRun.preflight_issues.warn.length} warning(s):
+                        {lastRun.warnings.length} warning(s):
                         <ul style={{ margin: '4px 0 0 16px', fontSize: 12 }}>
-                          {lastRun.preflight_issues.warn.map((w, i) => <li key={i}>{w.reason}</li>)}
+                          {lastRun.warnings.slice(0, 10).map((w, i) => <li key={i}>{w.message || w.reason}</li>)}
                         </ul>
                       </div>
                     </div>
                   )}
+
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     <button type="button" className="btn btn-outline" onClick={() => { setShowSummary(true); loadSummary(); }}>
                       <BarChart2 size={13} /> View allotment summary
@@ -315,12 +262,9 @@ export default function Allotment() {
                   <div className="alert alert-red" style={{ marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
                     <span>
                       <AlertCircle size={13} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-                      <b>{lastRun.solver_status_name || 'Failed'}</b>
-                      <span style={{ display: 'block', fontSize: 11, fontWeight: 400, marginTop: 4, opacity: 0.9 }}>
-                        Stored from a previous run. Clear it, then run again with 120–180s.
-                      </span>
+                      <b>{lastRun.solver_status_name || 'Failed'} — {lastRun.filled}/{lastRun.total} slots</b>
                     </span>
-                    <button type="button" className="btn btn-outline btn-sm" onClick={clearLastResult} disabled={isRunning}>
+                    <button type="button" className="btn btn-outline btn-sm" onClick={clearLastResult} disabled={running}>
                       Clear result
                     </button>
                   </div>
@@ -329,25 +273,12 @@ export default function Allotment() {
                       {lastRun.message}
                     </pre>
                   )}
-                  {lastRun.preflight_issues?.fatal?.length > 0 && (
+                  {lastRun.errors?.length > 0 && (
                     <div style={{ marginTop: 10 }}>
-                      {lastRun.preflight_issues.fatal.map((f, i) => (
+                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Issues found:</div>
+                      {lastRun.errors.map((e, i) => (
                         <div key={i} className="issue-card error" style={{ marginBottom: 6 }}>
-                          <span style={{ fontSize: 12 }}>{f.reason}</span>
-                          {f.actions?.length > 0 && (
-                            <div className="issue-actions" style={{ marginTop: 6 }}>
-                              {f.actions.map((act, j) => {
-                                const link = act.link || (act.page === 'Teachers' ? '/teachers' : act.page === 'Allocations' ? '/allocations' : null);
-                                return (
-                                <a key={j} href="#" className="issue-action-btn"
-                                   style={{ color: 'var(--red)', borderColor: '#fca5a5', fontSize: 11 }}
-                                   onClick={(e) => { e.preventDefault(); if (link) navigate(link); }}>
-                                  {act.page} → {act.action}
-                                </a>
-                                );
-                              })}
-                            </div>
-                          )}
+                          <span style={{ fontSize: 12 }}>{e.message}</span>
                         </div>
                       ))}
                     </div>
@@ -362,18 +293,14 @@ export default function Allotment() {
   );
 }
 
-function RuleRow({ label, hint, on, onToggle }) {
+function RuleInfo({ label, hint }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+      <CheckCircle size={14} style={{ color: 'var(--green)', flexShrink: 0, marginTop: 2 }} />
       <div>
         <div style={{ fontSize: 13, fontWeight: 600 }}>{label}</div>
         <div style={{ fontSize: 11, color: 'var(--mid)', marginTop: 2 }}>{hint}</div>
       </div>
-      <label className="toggle" style={{ flexShrink: 0, marginTop: 2 }}>
-        <input type="checkbox" checked={on} onChange={onToggle} />
-        <div className="toggle-track" />
-        <div className="toggle-thumb" />
-      </label>
     </div>
   );
 }

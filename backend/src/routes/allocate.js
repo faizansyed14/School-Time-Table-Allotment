@@ -1,35 +1,21 @@
 const router = require('express').Router();
 const supabase = require('../config/supabase');
-const getPythonCommand = require('../config/python');
 const requireAuth = require('../middleware/auth');
-const { spawn } = require('child_process');
-const fs = require('fs').promises;
-const path = require('path');
-const allocatorRun = require('../lib/allocatorRun');
+const { runTimetableEngine } = require('../lib/timetableEngine');
 
 router.use(requireAuth);
 
-const BACKEND_DIR = path.join(__dirname, '..', '..');
-const ROOT = path.join(BACKEND_DIR, '..');
-
 const SUBJECT_MAP = {
-  'English':'S01','Hindi':'S02','Maths':'S03','S.St':'S04','E.V.S':'S04',
-  'Science':'S05','G.K.':'S06','Drawing':'S07','Computer':'S08','Sanskrit':'S09',
-  'Games':'S10','Library':'S11','Diary':'S12','I.T.':'S08',
+  'English': 'S01', 'Hindi': 'S02', 'Maths': 'S03', 'S.St': 'S04', 'E.V.S': 'S04',
+  'Science': 'S05', 'G.K.': 'S06', 'Drawing': 'S07', 'Computer': 'S08', 'Sanskrit': 'S09',
+  'Games': 'S10', 'Library': 'S11', 'Diary': 'S12', 'I.T.': 'S08',
 };
-const SUBJECT_LIST = [
-  { id:'S01', name:'English' },  { id:'S02', name:'Hindi' },
-  { id:'S03', name:'Maths' },    { id:'S04', name:'S.St/E.V.S' },
-  { id:'S05', name:'Science' },  { id:'S06', name:'G.K.' },
-  { id:'S07', name:'Drawing' },  { id:'S08', name:'Computer' },
-  { id:'S09', name:'Sanskrit' }, { id:'S10', name:'Games' },
-  { id:'S11', name:'Library' },  { id:'S12', name:'Diary' },
-];
 
-function getStoredRules(raw) {
-  if (!raw || typeof raw !== 'object') return { R1: true, R2: true };
-  return { R1: raw.rules?.R1 ?? true, R2: raw.rules?.R2 ?? true };
-}
+// Reverse map for applying timetable
+const SUBJECT_ID_TO_NAME = {};
+Object.entries(SUBJECT_MAP).forEach(([name, id]) => {
+  if (!SUBJECT_ID_TO_NAME[id]) SUBJECT_ID_TO_NAME[id] = name;
+});
 
 async function persistLastRun(lastRun) {
   const { data: existing } = await supabase
@@ -42,51 +28,7 @@ async function persistLastRun(lastRun) {
   });
 }
 
-function pythonEnv() {
-  const env = { ...process.env, ALLOCATOR_WORKERS: process.env.ALLOCATOR_WORKERS || '1' };
-  if (process.env.ALLOCATOR_MAX_MEMORY_MB) {
-    env.ALLOCATOR_MAX_MEMORY_MB = process.env.ALLOCATOR_MAX_MEMORY_MB;
-  }
-  return env;
-}
-
-function startPythonAllocator(timeLimitSeconds, inFile, outFile) {
-  const pyPath = path.join(BACKEND_DIR, 'scripts', 'allocator.py');
-  const py = spawn(getPythonCommand(), [
-    pyPath, '--input', inFile, '--output', outFile, '--time-limit', String(timeLimitSeconds),
-  ], { stdio: ['ignore', 'pipe', 'pipe'], env: pythonEnv() });
-
-  allocatorRun.registerRun(py, timeLimitSeconds);
-
-  let stderr = '';
-  py.stderr.on('data', (b) => { stderr += b.toString(); });
-
-  py.on('close', async (code) => {
-    try {
-      if (allocatorRun.wasUserCancelled()) {
-        await persistLastRun({ success: false, cancelled: true, error: 'Allocation cancelled' });
-        return;
-      }
-      if (code !== 0) {
-        await persistLastRun({
-          success: false,
-          error: `Python exit ${code}: ${stderr.slice(0, 500)}`,
-        });
-        return;
-      }
-      const result = JSON.parse(await fs.readFile(outFile, 'utf-8'));
-      await persistLastRun(result);
-    } catch (e) {
-      await persistLastRun({ success: false, error: e.message });
-    }
-  });
-
-  py.on('error', async (e) => {
-    await persistLastRun({ success: false, error: e.message });
-  });
-}
-
-// GET last run result + rule flags
+// GET /result — last run result + rule flags
 router.get('/result', async (_req, res) => {
   const { data } = await supabase
     .from('allocation_reports').select('*').eq('id', 1).maybeSingle();
@@ -95,18 +37,18 @@ router.get('/result', async (_req, res) => {
   res.json({ rules, lastRun, generated_at: data.generated_at });
 });
 
-// PATCH update rule flags
+// PATCH /rules — update rules (kept for backward compat, but rules are now always active)
 router.patch('/rules', async (req, res) => {
   const { rules } = req.body || {};
   const { data: existing } = await supabase
     .from('allocation_reports').select('report').eq('id', 1).maybeSingle();
   const current = existing?.report || {};
-  const updated = { ...current, rules: { ...getStoredRules(current), ...rules } };
+  const updated = { ...current, rules: { R1: true, R2: true, ...rules } };
   await supabase.from('allocation_reports').upsert({ id: 1, report: updated });
   res.json({ rules: updated.rules });
 });
 
-// DELETE /result — clear stored lastRun (removes stale timeout errors from validation)
+// DELETE /result — clear stored lastRun
 router.delete('/result', async (_req, res) => {
   const { data: existing } = await supabase
     .from('allocation_reports').select('report').eq('id', 1).maybeSingle();
@@ -114,101 +56,80 @@ router.delete('/result', async (_req, res) => {
   const { lastRun: _removed, ...rest } = prev;
   await supabase.from('allocation_reports').upsert({
     id: 1,
-    report: { ...rest, rules: getStoredRules(prev) },
+    report: { ...rest, rules: { R1: true, R2: true } },
     generated_at: new Date().toISOString(),
   });
   res.json({ cleared: true });
 });
 
-// GET /status — whether CP-SAT is still running (survives page navigation)
+// GET /status — backward compat (always idle now since JS engine is sync)
 router.get('/status', (_req, res) => {
-  res.json(allocatorRun.getStatus());
+  res.json({ running: false });
 });
 
-// POST /cancel — stop active Python solver
+// POST /cancel — no-op for JS engine
 router.post('/cancel', (_req, res) => {
-  const cancelled = allocatorRun.cancelRun();
-  res.json({ cancelled });
+  res.json({ cancelled: false, message: 'JS engine runs synchronously, nothing to cancel.' });
 });
 
-// POST /run — build seed, start Python in background (202), poll /status + /result
-router.post('/run', async (req, res) => {
-  const maxSec = parseInt(process.env.ALLOCATOR_MAX_TIME_SEC || '300', 10);
-  const requested = Number(req.body?.timeLimitSeconds) || 120;
-  const timeLimitSeconds = Math.min(maxSec, Math.max(30, requested));
-
-  if (allocatorRun.isRunning()) {
-    return res.status(409).json({ error: 'Allocator is already running' });
-  }
-
+// ─── POST /run — Main allocator: reads DB directly, runs JS engine, returns result ───
+router.post('/run', async (_req, res) => {
   try {
-    // 1. Fetch data
-    const [allocs, classes, teachers, report] = await Promise.all([
+    const startTime = Date.now();
+
+    // 1. Fetch ALL data directly from database
+    const [allocsRes, classesRes, teachersRes] = await Promise.all([
       supabase.from('subject_allocations').select('teacher_id, class_id, subject, periods_weekly'),
       supabase.from('classes').select('id, name, class_level, class_teacher_id').order('display_order'),
       supabase.from('teachers').select('id, name, subjects, allotted_periods, min_period_start'),
-      supabase.from('allocation_reports').select('report').eq('id', 1).maybeSingle(),
     ]);
 
-    const ruleFlags = getStoredRules(report.data?.report);
+    if (allocsRes.error) throw new Error(`DB error (allocations): ${allocsRes.error.message}`);
+    if (classesRes.error) throw new Error(`DB error (classes): ${classesRes.error.message}`);
+    if (teachersRes.error) throw new Error(`DB error (teachers): ${teachersRes.error.message}`);
 
-    // 2. Build runtime seed
-    const classById = {};
-    (classes.data || []).forEach((c) => { classById[c.id] = c; });
-
-    const teacherRows = (teachers.data || []).map((t) => ({
-      id: t.id, name: t.name, erp_name: t.name,
-      subjects: (t.subjects || []).map((s) => SUBJECT_MAP[s] || 'S01').filter(Boolean),
-      max_class_level: 10,
-      total_periods: t.allotted_periods || 0,
+    const allocs = allocsRes.data || [];
+    const classes = classesRes.data || [];
+    const teachers = (teachersRes.data || []).map(t => ({
+      ...t,
       min_period_start: t.min_period_start || 1,
+      allotted_periods: t.allotted_periods || 0,
     }));
 
-    const allocationRows = (allocs.data || []).map((a) => ({
-      teacher_id: a.teacher_id,
-      class_id: a.class_id,
-      subject_id: SUBJECT_MAP[a.subject] || 'S01',
-      periods: a.periods_weekly,
-    }));
+    // 2. Run engine (synchronous, < 5 seconds)
+    const result = runTimetableEngine({
+      teachers,
+      classes,
+      allocations: allocs,
+    });
 
-    const classRows = (classes.data || []).map((c) => ({
-      id: c.id, name: c.name, level: c.class_level,
-      class_teacher_id: c.class_teacher_id || null,
-    }));
+    const elapsed = Date.now() - startTime;
+    result.elapsed_ms = elapsed;
+    result.message += ` (${elapsed}ms)`;
 
-    const rules = [
-      { id: 'R1', type: 'class_teacher_first_period', active: ruleFlags.R1, description: 'First period = class teacher' },
-      { id: 'R2', type: 'diary_last_period',           active: ruleFlags.R2, description: 'Last period = Diary (classes 1-2)' },
-      { id: 'R5', type: 'max_subject_per_day', value: 2, active: true, description: 'Max 2 periods same subject/day' },
-      { id: 'R6', type: 'games_not_last_period',        active: true, description: 'Games not in last period' },
-    ];
-
-    const seed = {
-      teachers: teacherRows,
-      classes: classRows,
-      subjects: SUBJECT_LIST,
-      allocations: allocationRows,
-      rules,
-      periods_per_day: 8,
-      days_per_week: 6,
-      total_periods: 48,
-    };
-
-    const tmpDir  = path.join(ROOT, 'database');
-    const inFile  = path.join(tmpDir, '.cp_runtime_seed.json');
-    const outFile = path.join(tmpDir, '.cp_runtime_result.json');
-    await fs.writeFile(inFile, JSON.stringify(seed, null, 2));
-
-    startPythonAllocator(timeLimitSeconds, inFile, outFile);
-    res.status(202).json({ started: true, timeLimitSeconds });
-  } catch (e) {
-    if (!res.writableEnded) {
-      res.status(500).json({ success: false, error: e.message });
+    console.log(`\n[TIMETABLE ENGINE] ${result.success ? 'SUCCESS' : 'PARTIAL'}: ${result.filled}/${result.total} slots in ${elapsed}ms`);
+    if (result.errors?.length > 0) {
+      console.log(`  Errors: ${result.errors.length}`);
+      result.errors.slice(0, 5).forEach(e => console.log(`    - ${e.message}`));
     }
+    if (result.warnings?.length > 0) {
+      console.log(`  Warnings: ${result.warnings.length}`);
+    }
+
+    // 3. Persist result
+    await persistLastRun(result);
+
+    // 4. Return result directly (synchronous, no polling needed)
+    res.json(result);
+  } catch (e) {
+    console.error('[TIMETABLE ENGINE] Error:', e.message);
+    const errorResult = { success: false, error: e.message, solver_status_name: 'ENGINE_ERROR' };
+    await persistLastRun(errorResult).catch(() => {});
+    res.status(500).json(errorResult);
   }
 });
 
-// POST /apply — write CP result to timetable table
+// POST /apply — write result to timetable table
 router.post('/apply', async (req, res) => {
   try {
     const { data: stored } = await supabase
@@ -217,17 +138,21 @@ router.post('/apply', async (req, res) => {
     if (!result?.success) return res.status(400).json({ error: 'No successful run to apply' });
 
     const grid = result.grid;
-    const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const rows = [];
 
-    // grid shape: { class_id: [[{teacher_id, subject_id}]] }
+    // grid shape: { class_id: [ [[ {teacher_id, subject_id} ]] ] }
     for (const [class_id, days] of Object.entries(grid)) {
       for (let d = 0; d < days.length; d++) {
         for (let p = 0; p < days[d].length; p++) {
           const slot = days[d][p];
           if (!slot || !slot.length) continue;
           const entry = slot[0];
-          const subjectName = Object.entries(SUBJECT_MAP).find(([, sid]) => sid === entry.subject_id)?.[0] || entry.subject_id;
+          // subject_id might be the subject name directly (from JS engine) or a code (from old CP-SAT)
+          let subjectName = entry.subject_id || entry.subject;
+          // If it's a code like S01, convert to name
+          if (subjectName && subjectName.startsWith('S') && SUBJECT_ID_TO_NAME[subjectName]) {
+            subjectName = SUBJECT_ID_TO_NAME[subjectName];
+          }
           rows.push({ class_id, teacher_id: entry.teacher_id, day: d + 1, period: p + 1, subject: subjectName });
         }
       }

@@ -7,7 +7,7 @@ import { useBalanceReminder } from '../lib/balanceReminder.jsx';
 import {
   Plus, Pencil, Trash2, Search, AlertCircle, CheckCircle,
   ArrowRightLeft, Users, BookOpen, ChevronDown, ChevronRight,
-  Sparkles, Loader, Info, BarChart2,
+  Sparkles, Loader, Info, BarChart2, Zap,
 } from 'lucide-react';
 
 const EMPTY = { teacher_id: '', class_id: '', subject: '', periods_weekly: '' };
@@ -400,14 +400,14 @@ export default function Allocations() {
             <p style={{ fontSize: 13, color: 'var(--mid)', marginBottom: 10 }}>
               Uses live data from <b>Curriculum</b> (periods per class), <b>Teachers</b> (subjects, targets, levels),
               and <b>Classes</b> (class teachers). Does <b>not</b> copy existing allocation rows.
-              CP-SAT builds a new set; each class totals 48 periods/week.
+              The built-in engine builds a new set; each class totals 48 periods/week.
             </p>
             <p style={{ fontSize: 12, color: 'var(--mid)', marginBottom: 10 }}>
               Prerequisite: sum of teacher targets = 720, each class curriculum = 48, class teachers set on Classes page.
               Run <b>Preview</b> first; fix any red errors on Teachers/Curriculum before Apply.
             </p>
             <div className="alert alert-amber" style={{ marginBottom: 14 }}>
-              <AlertCircle size={13} /> <b>Apply</b> will delete all existing allocations and replace them.
+              <Zap size={13} style={{ marginRight: 5 }} /> <b>Apply</b> will delete all existing allocations and replace them.
             </div>
 
             {!autoResult && (

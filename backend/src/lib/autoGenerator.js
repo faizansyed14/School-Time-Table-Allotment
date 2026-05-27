@@ -38,102 +38,165 @@ function autoGenerateAllocations({ teachers, classes, subjects }) {
     warnings.push(`Workload Mismatch: Teachers sum to ${totalTarget}p, but Curriculum needs ${totalDemand}p.`);
   }
 
-  // Pre-calculate eligibility
+  // Pre-calculate eligibility and sort by MRV (Minimum Remaining Values)
   requirements.forEach(req => {
     req.eligibleTeachers = teachers.filter(t => {
       const hasSubject = (t.subjects || []).includes(req.subject);
       const levelMatch = req.class_level >= (t.min_class_level || 0) && req.class_level <= (t.max_class_level || 10);
+      
+      // RULE: Only the Class Teacher can teach 'Diary' in their own class
+      if (req.subject === 'Diary') {
+        return t.id === req.class_teacher_id && hasSubject;
+      }
       return hasSubject && levelMatch;
     }).map(t => t.id);
   });
 
+  // Sort requirements: 
+  // 1. Prioritize requirements where a Class Teacher is eligible and needs periods (to lock them in).
+  // 2. Then follow MRV (hardest subjects first).
+  const sortReqs = (reqs, ctLoadMap) => {
+    return reqs.sort((a, b) => {
+      // Rule: If one requirement can be filled by its own CT who is under 6p, do it first
+      const aNeedsCT = a.eligibleTeachers.includes(a.class_teacher_id) && (ctLoadMap[a.class_teacher_id] || 0) < 6;
+      const bNeedsCT = b.eligibleTeachers.includes(b.class_teacher_id) && (ctLoadMap[b.class_teacher_id] || 0) < 6;
+      
+      if (aNeedsCT && !bNeedsCT) return -1;
+      if (!aNeedsCT && bNeedsCT) return 1;
+      
+      // Fallback to MRV
+      return a.eligibleTeachers.length - b.eligibleTeachers.length || Math.random() - 0.5;
+    });
+  };
+
   let bestResult = null;
   let bestScore = -1;
 
-  // Multi-pass Search (Monte Carlo)
-  // Try 5000 iterations to find a perfect fit
-  for (let iter = 0; iter < 5000; iter++) {
+  // Multi-pass Search (Monte Carlo + Priority Heuristic + Splitting Support)
+  // We run 50,000 iterations to ensure we explore nearly every possible path.
+  for (let iter = 0; iter < 50000; iter++) {
     const currentAllocations = [];
     const teacherLoad = {};
     const diaryLoad = {};
-    teachers.forEach(t => { teacherLoad[t.id] = 0; diaryLoad[t.id] = 0; });
+    const ctClassLoad = {}; // Track periods a CT teaches in THEIR OWN class
+    const tempReqs = JSON.parse(JSON.stringify(requirements)); 
 
-    // Shuffle requirements to explore different paths
-    const shuffledReqs = [...requirements].sort(() => Math.random() - 0.5);
-    
+    teachers.forEach(t => { 
+      teacherLoad[t.id] = 0; 
+      diaryLoad[t.id] = 0;
+      ctClassLoad[t.id] = 0;
+    });
+
     let filledCount = 0;
-    for (const req of shuffledReqs) {
+    
+    while (tempReqs.length > 0) {
+      // Re-sort every time because ctClassLoad changes
+      sortReqs(tempReqs, ctClassLoad);
+      const req = tempReqs.shift();
+
+      // Find candidates who have workload capacity left
       let candidateIds = req.eligibleTeachers.filter(tid => {
         const t = teachers.find(x => x.id === tid);
-        const hasWorkloadCap = (teacherLoad[tid] + req.periods_weekly) <= (t.allotted_periods || 0);
-        if (req.subject === 'Diary') {
-          return hasWorkloadCap && (diaryLoad[tid] + req.periods_weekly) <= 6;
-        }
-        return hasWorkloadCap;
+        return teacherLoad[tid] < (t.allotted_periods || 0);
       });
 
-      if (candidateIds.length === 0) continue;
-
-      // Priority: 1. Class Teacher  2. Random
-      let selectedId;
-      if (candidateIds.includes(req.class_teacher_id)) {
-        // High probability of picking class teacher if eligible
-        selectedId = Math.random() > 0.1 ? req.class_teacher_id : candidateIds[Math.floor(Math.random() * candidateIds.length)];
-      } else {
-        selectedId = candidateIds[Math.floor(Math.random() * candidateIds.length)];
+      // Special Logic for 100% Fill: If NO specialist with capacity, allow anyone with capacity (Fallback)
+      let isFallback = false;
+      if (candidateIds.length === 0) {
+        candidateIds = teachers
+          .filter(t => teacherLoad[t.id] < (t.allotted_periods || 0))
+          .map(t => t.id);
+        isFallback = true;
       }
 
-      teacherLoad[selectedId] += req.periods_weekly;
-      if (req.subject === 'Diary') diaryLoad[selectedId] += req.periods_weekly;
+      if (candidateIds.length === 0) continue; // School is literally at 100% capacity
+
+      let selectedId;
+      const isCT = candidateIds.includes(req.class_teacher_id);
+      
+      if (req.subject === 'Diary' && isCT) {
+        selectedId = req.class_teacher_id;
+      } else if (!isFallback && isCT && ctClassLoad[req.class_teacher_id] < 6) {
+        // High priority: Fill Class Teacher in their OWN class until they hit 6 periods
+        selectedId = req.class_teacher_id;
+      } else {
+        // Balance workload among candidates
+        candidateIds.sort((a, b) => {
+          const tA = teachers.find(x => x.id === a);
+          const tB = teachers.find(x => x.id === b);
+          return ((tB.allotted_periods || 0) - teacherLoad[b]) - ((tA.allotted_periods || 0) - teacherLoad[a]);
+        });
+        // Favor specialist if in fallback mode
+        if (isFallback) {
+          const specialists = candidateIds.filter(tid => {
+            const t = teachers.find(x => x.id === tid);
+            return (t.subjects || []).includes(req.subject);
+          });
+          selectedId = specialists.length > 0 ? specialists[0] : candidateIds[0];
+        } else {
+          selectedId = candidateIds[0];
+        }
+      }
+
+      const t = teachers.find(x => x.id === selectedId);
+      const remainingTeacherCap = (t.allotted_periods || 0) - teacherLoad[selectedId];
+      let canTake = Math.min(req.periods_weekly, remainingTeacherCap);
+      
+      if (req.subject === 'Diary') {
+        const remainingDiaryCap = 6 - diaryLoad[selectedId];
+        canTake = Math.min(canTake, Math.max(0, remainingDiaryCap));
+      }
+
+      if (canTake <= 0) {
+        // Safety: if we can't take anything but there are more candidates, try another? 
+        // For simplicity, we just take 1 period if absolutely needed to avoid infinite loop
+        if (isFallback && remainingTeacherCap > 0) canTake = 1; else continue;
+      }
+
+      teacherLoad[selectedId] += canTake;
+      if (req.subject === 'Diary') diaryLoad[selectedId] += canTake;
+      if (selectedId === req.class_teacher_id) {
+        ctClassLoad[selectedId] += canTake;
+      }
+      
       currentAllocations.push({
         teacher_id: selectedId,
         class_id: req.class_id,
         subject: req.subject,
-        periods_weekly: req.periods_weekly
+        periods_weekly: canTake,
+        _isFallback: isFallback // Prefix with _ to indicate internal
       });
-      filledCount += req.periods_weekly;
+      filledCount += canTake;
+
+      if (canTake < req.periods_weekly) {
+        tempReqs.push({ ...req, periods_weekly: req.periods_weekly - canTake });
+      }
     }
 
     if (filledCount > bestScore) {
       bestScore = filledCount;
       bestResult = currentAllocations;
-      if (bestScore === totalDemand) break; // Found perfect 100%
+      if (bestScore === totalDemand) break; 
     }
   }
 
-  // If even after 5000 runs we aren't at 100%, do a greedy fallback to fill gaps
+  // Remove internal flags before returning
+  const finalAllocations = bestResult.map(({ _isFallback, ...rest }) => rest);
+
+  // Generate clear user-friendly warnings
+  const fallbackAllocs = bestResult.filter(a => a._isFallback);
+  if (fallbackAllocs.length > 0) {
+    const forcedSubjects = [...new Set(fallbackAllocs.map(a => a.subject))];
+    warnings.push(`Warning: Had to force assign ${forcedSubjects.join(', ')} to non-specialists to reach 100%.`);
+  }
+
   if (bestScore < totalDemand) {
-    const assignedKeys = new Set(bestResult.map(a => `${a.class_id}|${a.subject}`));
-    const remaining = requirements.filter(r => !assignedKeys.has(r.key));
-    
-    const teacherLoad = {};
-    teachers.forEach(t => { teacherLoad[t.id] = 0; });
-    bestResult.forEach(a => { teacherLoad[a.teacher_id] += a.periods_weekly; });
-
-    for (const req of remaining) {
-      // Find ANY teacher with capacity, priority to specialists
-      const candidates = [...teachers].sort((a, b) => {
-        const specA = (a.subjects || []).includes(req.subject) ? 1 : 0;
-        const specB = (b.subjects || []).includes(req.subject) ? 1 : 0;
-        if (specA !== specB) return specB - specA;
-        return ((b.allotted_periods || 0) - teacherLoad[b.id]) - ((a.allotted_periods || 0) - teacherLoad[a.id]);
-      });
-
-      const lucky = candidates[0];
-      teacherLoad[lucky.id] += req.periods_weekly;
-      bestResult.push({
-        teacher_id: lucky.id,
-        class_id: req.class_id,
-        subject: req.subject,
-        periods_weekly: req.periods_weekly
-      });
-      warnings.push(`FORCED: ${req.subject} in ${req.class_name} assigned to ${lucky.name} to reach 100%.`);
-    }
+    warnings.push(`Incomplete: Only ${bestScore}/${totalDemand} periods assigned! The school is at max capacity.`);
   }
 
   return {
     success: true,
-    allocations: bestResult,
+    allocations: finalAllocations,
     warnings
   };
 }

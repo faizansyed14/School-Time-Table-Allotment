@@ -92,7 +92,14 @@ export default function Allotment() {
   }
 
   const criticalIssues = (allotment?.issues || validation?.issues || []).filter((i) => i.severity === 'error');
-  const canRun = criticalIssues.length === 0 && !running;
+
+  // Only block the button for REAL data errors (curriculum, capacity etc.)
+  // Don't block it for 'timetable_solver_failed' - those are just records of the last failure.
+  const dataErrors = criticalIssues.filter(i => 
+    !['timetable_solver_failed', 'timetable_partial', 'class_timetable_short', 'timetable_preflight_fatal'].includes(i.type)
+  );
+  
+  const canRun = dataErrors.length === 0 && !running;
 
   return (
     <div>
@@ -101,11 +108,17 @@ export default function Allotment() {
           <h2>Allotment</h2>
           <p>Generate the complete school timetable using the built-in engine.</p>
         </div>
-        <button type="button" className="btn btn-outline" onClick={toggleSummary}>
-          <BarChart2 size={14} />
-          {showSummary ? 'Hide allotment summary' : 'View allotment summary'}
-          {showSummary ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-        </button>
+        <div style={{ display: 'flex', gap: 10 }}>
+          {lastRun && (
+            <button type="button" className="btn btn-outline" onClick={clearLastResult} style={{ color: 'var(--red)' }}>
+              <RefreshCw size={14} /> Clear Result
+            </button>
+          )}
+          <button type="button" className="btn btn-outline" onClick={toggleSummary}>
+            <BarChart2 size={14} />
+            {showSummary ? 'Hide summary' : 'View summary'}
+          </button>
+        </div>
       </div>
 
       {!showSummary && lastRun?.success && (
@@ -143,28 +156,29 @@ export default function Allotment() {
               </div>
             ) : (
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--red)', fontWeight: 600, fontSize: 14, marginBottom: 10 }}>
-                  <AlertCircle size={18} /> {criticalIssues.length} issue{criticalIssues.length !== 1 ? 's' : ''} to fix
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: criticalIssues.length === dataErrors.length ? 'var(--red)' : 'var(--orange)', fontWeight: 600, fontSize: 14, marginBottom: 10 }}>
+                  <AlertCircle size={18} /> {criticalIssues.length} issue{criticalIssues.length !== 1 ? 's' : ''} detected
                 </div>
-                {criticalIssues.slice(0, 5).map((issue, i) => (
-                  <div key={i} className="issue-card error" style={{ marginBottom: 6 }}>
-                    <span style={{ fontSize: 12, fontWeight: 500 }}>{issue.message}</span>
-                    {issue.actions?.length > 0 && (
-                      <div className="issue-actions" style={{ marginTop: 6 }}>
-                        {issue.actions.map((act, j) => (
-                          <a key={j} href="#" className="issue-action-btn"
-                            style={{ color: 'var(--red)', borderColor: '#fca5a5', fontSize: 11 }}
-                            onClick={(e) => { e.preventDefault(); if (act.link) navigate(act.link); }}>
-                            {act.page} → {act.label}
-                          </a>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-                <button className="btn btn-outline btn-sm" style={{ marginTop: 6 }} onClick={() => navigate('/allocations')}>
-                  Fix in Allocations <ArrowRight size={12} />
-                </button>
+                {/* Show only first 5 errors */}
+                {criticalIssues.slice(0, 5).map((issue, i) => {
+                  const isResultError = ['timetable_solver_failed', 'timetable_partial', 'class_timetable_short', 'timetable_preflight_fatal'].includes(issue.type);
+                  return (
+                    <div key={i} className={`issue-card ${isResultError ? 'warning' : 'error'}`} style={{ marginBottom: 6, opacity: isResultError ? 0.8 : 1 }}>
+                      <span style={{ fontSize: 12, fontWeight: 500 }}>{issue.message}</span>
+                      {issue.actions?.length > 0 && (
+                        <div className="issue-actions" style={{ marginTop: 6 }}>
+                          {issue.actions.map((act, j) => (
+                            <a key={j} href="#" className="issue-action-btn"
+                              style={{ fontSize: 11 }}
+                              onClick={(e) => { e.preventDefault(); if (act.link) navigate(act.link); }}>
+                              {act.page} → {act.label}
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -186,9 +200,13 @@ export default function Allotment() {
       <div className="card">
         <div className="card-header"><span style={{ fontWeight: 600, fontSize: 14 }}>Run Allocator</span></div>
         <div className="card-body">
-          {!canRun && criticalIssues.length > 0 && (
+          {dataErrors.length > 0 ? (
             <div className="alert alert-red" style={{ marginBottom: 14 }}>
-              <AlertCircle size={13} /> Fix the {criticalIssues.length} critical issue{criticalIssues.length !== 1 ? 's' : ''} above before running.
+              <AlertCircle size={13} /> Fix the {dataErrors.length} critical data errors above to enable generation.
+            </div>
+          ) : criticalIssues.length > 0 && (
+            <div className="alert alert-orange" style={{ marginBottom: 14, fontSize: 13 }}>
+              Note: Issues from the previous run are shown above. You can try generating again with different rules or data.
             </div>
           )}
 

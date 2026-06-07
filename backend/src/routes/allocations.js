@@ -1,7 +1,7 @@
 const router = require('express').Router();
 const supabase = require('../config/supabase');
 const requireAuth = require('../middleware/auth');
-const { buildPrecheckIssues, buildAllocationIssues } = require('../lib/allocationIssues');
+const { buildPrecheckIssues, buildAllocationIssues, buildAllocationPlanIssues } = require('../lib/allocationIssues');
 const {
   buildSolverPayload,
   buildTargetChanges,
@@ -100,19 +100,27 @@ router.post('/swap-teacher', async (req, res) => {
 
 // ── GET /validate ─────────────────────────────────────────────
 router.get('/validate', async (_req, res) => {
-  const [subj, classes, teachers, report] = await Promise.all([
+  const [subj, classes, teachers, report, allocs] = await Promise.all([
     supabase.from('subjects').select('*'),
     supabase.from('classes').select('id, name, class_level, class_teacher_id').order('display_order'),
     supabase.from('teachers').select('id, name, subjects, min_class_level, max_class_level, allotted_periods, min_period_start'),
     supabase.from('allocation_reports').select('report').eq('id', 1).maybeSingle(),
+    supabase.from('subject_allocations').select('teacher_id, class_id, subject, periods_weekly'),
   ]);
 
   const lastRun = report.data?.report?.lastRun || null;
+  const planIssues = buildAllocationPlanIssues({
+    subjects: subj.data,
+    classes: classes.data,
+    teachers: teachers.data,
+    allocations: allocs.data,
+  });
   const result = buildAllocationIssues({
     subjects: subj.data,
     classes: classes.data,
     teachers: teachers.data,
     lastRun,
+    planIssues,
   });
   res.json(result);
 });

@@ -47,9 +47,23 @@ function mapAllocationsToDb(rawAllocations, teachers, classes) {
   }));
 }
 
-function buildSolverPayload({ teachers, classes, subjects, mode = 'full' }) {
+function mapDbAllocationsToSolver(dbRows, teachers, classes) {
   const teacherById = Object.fromEntries(teachers.map((t) => [t.id, t]));
-  return {
+  const classById = Object.fromEntries(classes.map((c) => [c.id, c]));
+  return (dbRows || [])
+    .filter((r) => Number(r.periods_weekly) > 0)
+    .map((r) => ({
+      teacher: r.teacher_name || teacherById[r.teacher_id]?.name,
+      class: r.class_name || classById[r.class_id]?.name,
+      subject: r.subject,
+      periods: Number(r.periods_weekly),
+    }))
+    .filter((a) => a.teacher && a.class);
+}
+
+function buildSolverPayload({ teachers, classes, subjects, mode = 'full', allocations = null }) {
+  const teacherById = Object.fromEntries(teachers.map((t) => [t.id, t]));
+  const payload = {
     mode,
     teachers: teachers.map((t) => ({
       name: t.name,
@@ -68,6 +82,10 @@ function buildSolverPayload({ teachers, classes, subjects, mode = 'full' }) {
     time_limit: Number(process.env.SOLVER_TIME_LIMIT || 60),
     workers: Number(process.env.SOLVER_WORKERS || 8),
   };
+  if (mode === 'schedule' && allocations?.length) {
+    payload.allocations = allocations;
+  }
+  return payload;
 }
 
 function buildTargetChanges(teachers, targets, payloadTeachers) {
@@ -206,7 +224,7 @@ function transformSolverResult(raw, { teachers, classes }) {
       errors: (raw.errors || []).map((msg) => ({ type: 'solver_error', message: msg })),
       phase: raw.phase,
       targets: raw.targets || null,
-      phases: ['cp_sat_two_phase'],
+      phases: raw.phase === 'done' ? ['cp_sat_schedule'] : ['cp_sat_two_phase'],
     };
   }
 
@@ -274,7 +292,7 @@ function transformSolverResult(raw, { teachers, classes }) {
     class_summary,
     allocations,
     targets: raw.targets,
-    phases: ['cp_sat_allocate', 'cp_sat_schedule'],
+    phases: ['cp_sat_schedule'],
     preflight_issues: { fatal: [], warn: [] },
     errors: [],
     warnings: [],
@@ -288,6 +306,7 @@ module.exports = {
   buildSolverPayload,
   buildTargetChanges,
   buildClassSummaryFromAllocations,
+  mapDbAllocationsToSolver,
   mapAllocationsToDb,
   runSolver,
   transformAllocateResult,

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { api } from '../lib/api.js';
-import { buildRemindersAfterCurriculumChange } from '../lib/balanceHints.js';
+import { buildRemindersAfterCurriculumChange, checkBalanceInSync } from '../lib/balanceHints.js';
 import { useBalanceReminder } from '../lib/balanceReminder.jsx';
 import { Plus, Pencil, Trash2, AlertCircle } from 'lucide-react';
 
@@ -33,7 +33,7 @@ export default function Curriculum() {
 
 // ── Subjects Tab ──────────────────────────────────────────────
 function SubjectsTab() {
-  const { setReminder } = useBalanceReminder();
+  const { setReminder, clearReminder } = useBalanceReminder();
   const [subjects, setSubjects] = useState([]);
   const [classes, setClasses] = useState([]);
   const [teachers, setTeachers] = useState([]);
@@ -45,8 +45,7 @@ function SubjectsTab() {
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState(null);
 
-  const load = useCallback(() => {
-    Promise.all([
+  const load = useCallback(() => Promise.all([
       api.get('/subjects'),
       api.get('/classes'),
       api.get('/teachers'),
@@ -58,8 +57,7 @@ function SubjectsTab() {
         setTeachers(t);
         setAllocs(a);
       })
-      .catch(console.error);
-  }, []);
+      .catch(console.error), []);
   useEffect(() => { load(); }, [load]);
 
   function openAdd() {
@@ -90,7 +88,21 @@ function SubjectsTab() {
         if (hint) setReminder(hint);
       }
       setModal(null);
-      load();
+      await load();
+      const [freshSubjects, freshClasses, freshTeachers, freshAllocs] = await Promise.all([
+        api.get('/subjects'),
+        api.get('/classes'),
+        api.get('/teachers'),
+        api.get('/allocations'),
+      ]);
+      if (checkBalanceInSync({
+        subjects: freshSubjects,
+        classes: freshClasses,
+        teachers: freshTeachers,
+        allocs: freshAllocs,
+      })) {
+        clearReminder();
+      }
     } catch (e) { setError(e.message); }
     finally { setSaving(false); }
   }

@@ -87,6 +87,88 @@ function buildPrecheckIssues({ subjects, classes, teachers }) {
   return issues;
 }
 
+/** Saved allocation rows must match curriculum before Allotment (Phase B). */
+function buildAllocationPlanIssues({ subjects, classes, teachers, allocations }) {
+  const issues = [];
+  const teacherById = Object.fromEntries((teachers || []).map((t) => [t.id, t]));
+  const classById = Object.fromEntries((classes || []).map((c) => [c.id, c]));
+
+  if (!allocations?.length) {
+    issues.push({
+      severity: 'error',
+      type: 'no_saved_allocations',
+      message: 'No saved allocations. Auto-generate or enter rows on the Allocations page first.',
+      actions: [{ page: 'Allocations', label: 'Open Allocations', link: '/allocations' }],
+    });
+    return issues;
+  }
+
+  const expected = {};
+  for (const cls of classes || []) {
+    const col = subjectColumnForClass(cls.name);
+    expected[cls.name] = { total: 0, subjects: {} };
+    for (const s of subjects || []) {
+      const p = s[col];
+      if (p != null && Number(p) > 0) {
+        expected[cls.name].subjects[s.name] = Number(p);
+        expected[cls.name].total += Number(p);
+      }
+    }
+  }
+
+  const actual = {};
+  for (const row of allocations) {
+    const cls = classById[row.class_id];
+    const tch = teacherById[row.teacher_id];
+    if (!cls || !tch) continue;
+    const cname = cls.name;
+    const periods = Number(row.periods_weekly);
+    if (!actual[cname]) actual[cname] = { total: 0, subjects: {} };
+    actual[cname].subjects[row.subject] = (actual[cname].subjects[row.subject] || 0) + periods;
+    actual[cname].total += periods;
+
+    if (!eligibleTeachers(teachers, cls.class_level, row.subject).some((t) => t.id === row.teacher_id)) {
+      issues.push({
+        severity: 'error',
+        type: 'allocation_ineligible',
+        class_name: cname,
+        subject: row.subject,
+        message: `${tch.name} cannot teach ${row.subject} to class ${cname} (level ${cls.class_level}).`,
+        actions: [{ page: 'Allocations', label: 'Fix allocation row', link: '/allocations' }],
+      });
+    }
+  }
+
+  for (const cls of classes || []) {
+    const cname = cls.name;
+    const got = actual[cname]?.total || 0;
+    if (got !== PERIODS_PER_CLASS) {
+      issues.push({
+        severity: 'error',
+        type: 'allocation_not_48',
+        class_name: cname,
+        message: `Class ${cname} allocations sum to ${got} (must be ${PERIODS_PER_CLASS}).`,
+        actions: [{ page: 'Allocations', label: `Fix Class ${cname}`, link: '/allocations' }],
+      });
+    }
+    for (const [sub, need] of Object.entries(expected[cname]?.subjects || {})) {
+      const have = actual[cname]?.subjects[sub] || 0;
+      if (have !== need) {
+        issues.push({
+          severity: 'error',
+          type: 'allocation_subject_mismatch',
+          class_name: cname,
+          subject: sub,
+          message: `Class ${cname} ${sub}: allocated ${have}, curriculum requires ${need}.`,
+          actions: [{ page: 'Allocations', label: 'Fix allocations', link: '/allocations' }],
+        });
+      }
+    }
+  }
+
+  return issues;
+}
+
 function buildSolverIssues(lastRun) {
   if (!lastRun || lastRun.success) return [];
   const issues = [];
@@ -114,9 +196,10 @@ function buildSolverIssues(lastRun) {
   return issues;
 }
 
-function buildAllocationIssues({ subjects, classes, teachers, lastRun }) {
+function buildAllocationIssues({ subjects, classes, teachers, lastRun, planIssues = [] }) {
   const issues = sortIssues(dedupeIssues([
     ...buildPrecheckIssues({ subjects, classes, teachers }),
+    ...planIssues,
     ...buildSolverIssues(lastRun),
   ]));
 
@@ -133,6 +216,7 @@ function buildAllocationIssues({ subjects, classes, teachers, lastRun }) {
 module.exports = {
   PERIODS_PER_CLASS,
   buildPrecheckIssues,
+  buildAllocationPlanIssues,
   buildAllocationIssues,
   subjectColumnForClass,
 };

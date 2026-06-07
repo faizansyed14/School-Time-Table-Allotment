@@ -309,7 +309,7 @@ export default function ResultPanel({
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <CheckCircle size={14} />
               <span>
-                Complete — {filled}/{total} periods {mode === 'full' ? 'placed' : 'allocated'}.
+                Complete — {filled}/{total} periods {(mode === 'full' || mode === 'schedule') ? 'placed' : 'allocated'}.
                 {normalized.applied && ' Applied to database.'}
               </span>
             </div>
@@ -339,7 +339,7 @@ export default function ResultPanel({
         {success && (
           <>
             <AllocationSummaryTable rows={classRows} mode={mode} />
-            <TargetChangesSection changes={normalized.targetChanges} />
+            {mode === 'allocate' && <TargetChangesSection changes={normalized.targetChanges} />}
             {children}
           </>
         )}

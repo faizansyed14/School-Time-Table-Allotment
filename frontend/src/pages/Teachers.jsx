@@ -2,9 +2,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { SUBJECT_OPTIONS } from '../lib/utils.js';
-import { buildRemindersAfterTeacherAllocFieldsChange, sumTeacherAlloc } from '../lib/balanceHints.js';
+import { buildRemindersAfterTeacherAllocFieldsChange, sumTeacherAlloc, checkBalanceInSync } from '../lib/balanceHints.js';
 import { useBalanceReminder } from '../lib/balanceReminder.jsx';
-import { Plus, Pencil, Trash2, Search, AlertCircle, GraduationCap } from 'lucide-react';
+import { Plus, Pencil, Trash2, Search, AlertCircle, GraduationCap, Download } from 'lucide-react';
+import { exportTeachersExcel } from '../lib/teachersExport.js';
 
 const EMPTY = {
   name: '', subjects: [], min_class_level: 1, max_class_level: 10,
@@ -35,14 +36,12 @@ export default function Teachers() {
   const [saving, setSaving]         = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const navigate = useNavigate();
-  const { setReminder } = useBalanceReminder();
+  const { setReminder, clearReminder } = useBalanceReminder();
   const [allocs, setAllocs] = useState([]);
 
-  const load = useCallback(() => {
-    Promise.all([api.get('/teachers'), api.get('/classes'), api.get('/allocations')])
+  const load = useCallback(() => Promise.all([api.get('/teachers'), api.get('/classes'), api.get('/allocations')])
       .then(([t, c, a]) => { setTeachers(t || []); setClasses(c || []); setAllocs(a || []); })
-      .catch(console.error);
-  }, []);
+      .catch(console.error), []);
   useEffect(() => { load(); }, [load]);
 
   // Map: teacher_id → class they are CT of
@@ -108,24 +107,39 @@ export default function Teachers() {
           classes,
         });
         if (hint) setReminder(hint);
-        else if (targetForApi(form.targetInput) !== sumTeacherAlloc(savedTeacher.id, allocs)) {
+        else if (targetForApi(form.targetInput) > 0
+          && targetForApi(form.targetInput) !== sumTeacherAlloc(savedTeacher.id, allocs)) {
           setReminder({
             source: 'teachers',
             title: 'Teacher saved — check workload',
             items: [{
               page: 'Allocations',
               link: `/allocations?teacher=${savedTeacher.id}`,
-              text: `**${savedTeacher.name}**: target **${targetForApi(form.targetInput) || 'Auto'}** — allocations currently sum to **${sumTeacherAlloc(savedTeacher.id, allocs)}**p.`,
+              text: `**${savedTeacher.name}**: target **${targetForApi(form.targetInput)}p** — allocations currently sum to **${sumTeacherAlloc(savedTeacher.id, allocs)}**p.`,
             }, {
               page: 'Allotment',
               link: '/allotment',
-              text: 'Then re-run **Allotment** and Apply.',
+              text: 'Then **Allotment** → Schedule Timetable → Apply.',
             }],
           });
         }
       }
 
-      load();
+      await load();
+      const [subjects, freshClasses, freshTeachers, freshAllocs] = await Promise.all([
+        api.get('/subjects'),
+        api.get('/classes'),
+        api.get('/teachers'),
+        api.get('/allocations'),
+      ]);
+      if (checkBalanceInSync({
+        subjects,
+        classes: freshClasses,
+        teachers: freshTeachers,
+        allocs: freshAllocs,
+      })) {
+        clearReminder();
+      }
       setModal(null);
     } catch (e) { setError(e.message); }
     finally { setSaving(false); }
@@ -153,6 +167,17 @@ export default function Teachers() {
   const targetNum = targetForApi(form.targetInput);
   const filtered = teachers.filter((t) => !search || t.name.toLowerCase().includes(search.toLowerCase()));
 
+  function handleExport() {
+    exportTeachersExcel({
+      teachers: filtered,
+      classes,
+      allocs,
+      filename: search
+        ? `Teachers-filtered-${new Date().toISOString().slice(0, 10)}.xlsx`
+        : undefined,
+    });
+  }
+
   return (
     <div>
       <div className="page-header">
@@ -160,7 +185,12 @@ export default function Teachers() {
           <h2>Teachers</h2>
           <p>{teachers.length} teachers · {classes.filter(c => c.class_teacher_id).length} class teachers assigned</p>
         </div>
-        <button className="btn btn-primary" onClick={openAdd}><Plus size={14} /> Add Teacher</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button type="button" className="btn btn-outline" onClick={handleExport} disabled={!filtered.length}>
+            <Download size={14} /> Export Excel
+          </button>
+          <button className="btn btn-primary" onClick={openAdd}><Plus size={14} /> Add Teacher</button>
+        </div>
       </div>
 
       <div className="toolbar">

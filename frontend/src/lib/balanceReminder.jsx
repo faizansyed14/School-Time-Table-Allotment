@@ -1,6 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { X, ListChecks } from 'lucide-react';
+import { api } from './api.js';
+import { checkBalanceInSync } from './balanceHints.js';
 
 const STORAGE_KEY = 'erp_balance_reminder';
 const BalanceReminderContext = createContext(null);
@@ -38,8 +40,45 @@ export function useBalanceReminder() {
   return ctx;
 }
 
+/** Polls live data and clears the banner once curriculum + allocations (+ fixed targets) match. */
+export function useBalanceAutoClear() {
+  const { reminder, clearReminder } = useBalanceReminder();
+  const location = useLocation();
+
+  useEffect(() => {
+    if (!reminder) return undefined;
+
+    let cancelled = false;
+
+    async function check() {
+      try {
+        const [subjects, classes, teachers, allocs] = await Promise.all([
+          api.get('/subjects'),
+          api.get('/timetable/classes'),
+          api.get('/teachers'),
+          api.get('/allocations'),
+        ]);
+        if (cancelled) return;
+        if (checkBalanceInSync({ subjects, classes, teachers, allocs })) {
+          clearReminder();
+        }
+      } catch {
+        /* ignore network errors during poll */
+      }
+    }
+
+    check();
+    const id = setInterval(check, 1500);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [reminder, location.pathname, clearReminder]);
+}
+
 export function BalanceReminderBanner() {
   const { reminder, clearReminder } = useBalanceReminder();
+  useBalanceAutoClear();
   const navigate = useNavigate();
   if (!reminder?.items?.length) return null;
 

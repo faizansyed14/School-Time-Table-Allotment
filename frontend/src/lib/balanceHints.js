@@ -44,6 +44,41 @@ export function applyAllocationChange(allocs, change) {
   );
 }
 
+export function checkBalanceInSync({ subjects, classes, teachers, allocs }) {
+  if (!classes?.length || !subjects?.length) return false;
+
+  for (const cls of classes) {
+    const col = `periods_${String(cls.name).toLowerCase()}`;
+    const expected = {};
+    let curriculumTotal = 0;
+    for (const s of subjects) {
+      const p = Number(s[col]) || 0;
+      if (p > 0) {
+        expected[s.name] = p;
+        curriculumTotal += p;
+      }
+    }
+    if (curriculumTotal !== 48) return false;
+    if (sumClassAlloc(cls.id, allocs) !== 48) return false;
+    for (const [sub, need] of Object.entries(expected)) {
+      if (sumSubjectInClass(cls.id, sub, allocs) !== need) return false;
+    }
+    if (cls.class_teacher_id) {
+      const ctPeriods = (allocs || [])
+        .filter((a) => a.class_id === cls.id && a.teacher_id === cls.class_teacher_id)
+        .reduce((n, a) => n + (a.periods_weekly || 0), 0);
+      if (ctPeriods > 0 && ctPeriods < 6) return false;
+    }
+  }
+
+  for (const t of teachers || []) {
+    const target = Number(t.allotted_periods) || 0;
+    if (target > 0 && sumTeacherAlloc(t.id, allocs) !== target) return false;
+  }
+
+  return (allocs || []).length > 0;
+}
+
 export function buildRemindersAfterAllocationChange({ change, teachers, classes, allocs }) {
   const next = applyAllocationChange(allocs, change);
   const cls = classes.find((c) => c.id === change.class_id);
@@ -79,11 +114,13 @@ export function buildRemindersAfterAllocationChange({ change, teachers, classes,
 
   const teacherTotal = sumTeacherAlloc(change.teacher_id, next);
   const target = tch?.allotted_periods ?? 0;
-  items.push({
-    page: 'Teachers',
-    link: '/teachers',
-    text: `Teachers → **${teacherName}** → Allotted periods: set to **${teacherTotal}**p${target !== teacherTotal ? ` (target is ${target}p now)` : ''}.`,
-  });
+  if (target > 0) {
+    items.push({
+      page: 'Teachers',
+      link: '/teachers',
+      text: `Teachers → **${teacherName}** → Allotted periods: set to **${teacherTotal}**p${target !== teacherTotal ? ` (target is ${target}p now)` : ''}.`,
+    });
+  }
 
   const classTotal = sumClassAlloc(change.class_id, next);
   if (classTotal !== 48) {
@@ -110,7 +147,7 @@ export function buildRemindersAfterAllocationChange({ change, teachers, classes,
   items.push({
     page: 'Allotment',
     link: '/allotment',
-    text: 'When Curriculum + Teachers + Allocations all match → **Allotment** → Run Allocator → **Apply to Timetable**.',
+    text: 'When Curriculum + Allocations match → **Allotment** → **Schedule Timetable** → Apply.',
   });
 
   return {
@@ -156,7 +193,7 @@ export function buildRemindersAfterCurriculumChange({ subjectName, oldForm, newF
   items.push({
     page: 'Allotment',
     link: '/allotment',
-    text: 'Then **Allotment** → re-run solver → Apply (timetable only updates after apply).',
+    text: 'Then **Allotment** → Schedule Timetable → Apply.',
   });
 
   return {
@@ -186,7 +223,7 @@ export function buildRemindersAfterTeacherTargetChange({ teacher, oldTarget, new
       {
         page: 'Allotment',
         link: '/allotment',
-        text: 'Then re-run **Allotment** and Apply.',
+        text: 'Then **Allotment** → Schedule Timetable → Apply.',
       },
     ],
   };

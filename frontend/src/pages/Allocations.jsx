@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { SUBJECT_OPTIONS } from '../lib/utils.js';
-import { buildRemindersAfterAllocationChange } from '../lib/balanceHints.js';
+import { buildRemindersAfterAllocationChange, checkBalanceInSync } from '../lib/balanceHints.js';
 import { useBalanceReminder } from '../lib/balanceReminder.jsx';
 import {
   Plus, Pencil, Trash2, Search, AlertCircle, CheckCircle,
@@ -36,7 +36,7 @@ export default function Allocations() {
   const [autoResult, setAutoResult] = useState(null);
   const [autoLoading, setAutoLoading] = useState(false);
   const [searchParams] = useSearchParams();
-  const { setReminder } = useBalanceReminder();
+  const { setReminder, clearReminder } = useBalanceReminder();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -115,9 +115,17 @@ export default function Allocations() {
       } else {
         await api.put(`/allocations/${form.teacher_id}/${form.class_id}/${encodeURIComponent(form.subject)}`, { periods_weekly: newPeriods });
       }
-      setReminder(buildRemindersAfterAllocationChange({ change, teachers, classes, allocs }));
       setModal(null);
-      load();
+      await load();
+      const [subjects, freshAllocs] = await Promise.all([
+        api.get('/subjects'),
+        api.get('/allocations'),
+      ]);
+      if (checkBalanceInSync({ subjects, classes, teachers, allocs: freshAllocs })) {
+        clearReminder();
+      } else {
+        setReminder(buildRemindersAfterAllocationChange({ change, teachers, classes, allocs }));
+      }
     } catch (e) { setError(e.message); }
     finally { setSaving(false); }
   }
@@ -133,9 +141,17 @@ export default function Allocations() {
         newPeriods: 0,
       };
       await api.delete(`/allocations/${deleteRow.teacher_id}/${deleteRow.class_id}/${encodeURIComponent(deleteRow.subject)}`);
-      setReminder(buildRemindersAfterAllocationChange({ change, teachers, classes, allocs }));
       setDeleteRow(null);
-      load();
+      await load();
+      const [subjects, freshAllocs] = await Promise.all([
+        api.get('/subjects'),
+        api.get('/allocations'),
+      ]);
+      if (checkBalanceInSync({ subjects, classes, teachers, allocs: freshAllocs })) {
+        clearReminder();
+      } else {
+        setReminder(buildRemindersAfterAllocationChange({ change, teachers, classes, allocs }));
+      }
     } catch (e) { alert(e.message); }
   }
 
@@ -363,9 +379,10 @@ export default function Allocations() {
           <div className="modal" style={{ maxWidth: 640 }}>
             <h2 className="modal-title">Auto-Generate Allocations</h2>
             <p style={{ fontSize: 13, color: 'var(--mid)', marginBottom: 10 }}>
-              Uses the same CP-SAT engine as <b>Allotment</b> (Phase A only). Reads live
+              Builds the weekly <b>plan</b> (Phase A only). Reads live
               <b> Curriculum</b>, <b>Teachers</b> (subjects, levels, pinned targets), and <b>Classes</b> (class teachers).
               Blank teacher target = Auto (solver decides). Pinned number = fixed.
+              Then run <b>Allotment</b> to schedule this plan into the grid.
             </p>
             <p style={{ fontSize: 12, color: 'var(--mid)', marginBottom: 10 }}>
               Prerequisites: each class curriculum = {PERIODS_PER_CLASS} periods, class teachers assigned, subject coverage OK.

@@ -106,7 +106,7 @@ export default function Allotment() {
       <div className="page-header">
         <div>
           <h2>Allotment</h2>
-          <p>Generate allocations + timetable from Curriculum (CP-SAT — deterministic).</p>
+          <p>Schedule saved allocations into the weekly grid (Phase B — R1–R5). Generate or edit the plan on Allocations first.</p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           {lastRun && (
@@ -139,7 +139,7 @@ export default function Allotment() {
             {!validation ? (
               <p style={{ fontSize: 13, color: 'var(--mid)' }}>Checking…</p>
             ) : (
-              <ResultPanel precheckIssues={precheckIssues} mode="allocate" />
+              <ResultPanel precheckIssues={precheckIssues} mode="schedule" />
             )}
           </div>
         </div>
@@ -156,23 +156,23 @@ export default function Allotment() {
       </div>
 
       <div className="card">
-        <div className="card-header"><span style={{ fontWeight: 600, fontSize: 14 }}>Run Allocator</span></div>
+        <div className="card-header"><span style={{ fontWeight: 600, fontSize: 14 }}>Schedule Timetable</span></div>
         <div className="card-body">
           {precheckErrors.length > 0 && (
             <p style={{ fontSize: 13, color: 'var(--red)', marginBottom: 12 }}>
-              Fix {precheckErrors.length} data error{precheckErrors.length !== 1 ? 's' : ''} above before running.
+              Fix {precheckErrors.length} issue{precheckErrors.length !== 1 ? 's' : ''} above (curriculum, coverage, or saved allocations) before scheduling.
             </p>
           )}
 
           <button className="btn btn-primary" onClick={runSolver} disabled={!canRun || running} style={{ minWidth: 200 }}>
             {running
-              ? <><Loader size={13} className="spinner" /> Generating…</>
-              : <><Zap size={13} /> Generate Timetable</>}
+              ? <><Loader size={13} className="spinner" /> Scheduling…</>
+              : <><Zap size={13} /> Schedule Timetable</>}
           </button>
 
           <ResultPanel
             result={lastRun}
-            mode="full"
+            mode="schedule"
             loading={running}
             precheckIssues={[]}
             classes={classes}

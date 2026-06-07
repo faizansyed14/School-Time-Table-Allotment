@@ -6,12 +6,18 @@ services:
     name: school-erp-api
     runtime: node
     rootDir: backend
-    buildCommand: npm install
+    buildCommand: npm install && pip install -r requirements.txt
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production
+      - key: PYTHON
+        value: python3
+      - key: SOLVER_WORKERS
+        value: "8"
+      - key: SOLVER_TIME_LIMIT
+        value: "60"
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY

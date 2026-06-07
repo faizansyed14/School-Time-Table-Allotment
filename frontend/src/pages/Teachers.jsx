@@ -8,8 +8,20 @@ import { Plus, Pencil, Trash2, Search, AlertCircle, GraduationCap } from 'lucide
 
 const EMPTY = {
   name: '', subjects: [], min_class_level: 1, max_class_level: 10,
-  allotted_periods: 0, min_period_start: 1,
+  targetInput: '', min_period_start: 1,
 };
+
+function targetInputFromDb(allottedPeriods) {
+  const n = Number(allottedPeriods);
+  return Number.isFinite(n) && n > 0 ? String(n) : '';
+}
+
+function targetForApi(targetInput) {
+  const trimmed = String(targetInput ?? '').trim();
+  if (!trimmed) return 0;
+  const n = Number(trimmed);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
 
 export default function Teachers() {
   const [teachers, setTeachers]     = useState([]);
@@ -46,7 +58,7 @@ export default function Teachers() {
       name: t.name, subjects: t.subjects || [],
       min_class_level: t.min_class_level || 1,
       max_class_level: t.max_class_level || 10,
-      allotted_periods: t.allotted_periods || 0,
+      targetInput: targetInputFromDb(t.allotted_periods),
       min_period_start: t.min_period_start || 1,
     };
     setForm(f);
@@ -62,11 +74,16 @@ export default function Teachers() {
     if (!form.name.trim()) { setError('Name is required.'); return; }
     setSaving(true);
     try {
+      const body = {
+        ...form,
+        allotted_periods: targetForApi(form.targetInput),
+      };
+      delete body.targetInput;
       let savedTeacher;
       if (modal === 'add') {
-        savedTeacher = await api.post('/teachers', form);
+        savedTeacher = await api.post('/teachers', body);
       } else {
-        savedTeacher = await api.put(`/teachers/${modal.id}`, form);
+        savedTeacher = await api.put(`/teachers/${modal.id}`, body);
       }
 
       // Handle class teacher assignment
@@ -85,20 +102,20 @@ export default function Teachers() {
       if (modal !== 'add') {
         const hint = buildRemindersAfterTeacherAllocFieldsChange({
           teacher: savedTeacher,
-          oldForm: savedForm,
-          newForm: form,
+          oldForm: savedForm ? { ...savedForm, allotted_periods: targetForApi(savedForm.targetInput) } : null,
+          newForm: { ...form, allotted_periods: targetForApi(form.targetInput) },
           allocs,
           classes,
         });
         if (hint) setReminder(hint);
-        else if (Number(form.allotted_periods) !== sumTeacherAlloc(savedTeacher.id, allocs)) {
+        else if (targetForApi(form.targetInput) !== sumTeacherAlloc(savedTeacher.id, allocs)) {
           setReminder({
             source: 'teachers',
             title: 'Teacher saved — check workload',
             items: [{
               page: 'Allocations',
               link: `/allocations?teacher=${savedTeacher.id}`,
-              text: `**${savedTeacher.name}**: allotted **${form.allotted_periods}**p — allocations currently sum to **${sumTeacherAlloc(savedTeacher.id, allocs)}**p. Match them.`,
+              text: `**${savedTeacher.name}**: target **${targetForApi(form.targetInput) || 'Auto'}** — allocations currently sum to **${sumTeacherAlloc(savedTeacher.id, allocs)}**p.`,
             }, {
               page: 'Allotment',
               link: '/allotment',
@@ -133,6 +150,7 @@ export default function Teachers() {
   }
 
   const capacity = (8 - ((form.min_period_start || 1) - 1)) * 6;
+  const targetNum = targetForApi(form.targetInput);
   const filtered = teachers.filter((t) => !search || t.name.toLowerCase().includes(search.toLowerCase()));
 
   return (
@@ -189,7 +207,15 @@ export default function Teachers() {
                     </div>
                   </td>
                   <td style={{ color: 'var(--mid)' }}>{t.min_class_level}–{t.max_class_level}</td>
-                  <td><span className="badge badge-blue">{t.allotted_periods}p</span></td>
+                  <td>
+                    {(t.allotted_periods || 0) > 0 ? (
+                      <span className="badge badge-blue">{t.allotted_periods}p fixed</span>
+                    ) : (
+                      <span className="badge badge-gray" title={t.allocated_periods ? `Last run: ${t.allocated_periods}p` : undefined}>
+                        Auto{t.allocated_periods ? ` (${t.allocated_periods}p)` : ''}
+                      </span>
+                    )}
+                  </td>
                   <td style={{ color: 'var(--mid)', fontSize: 12 }}>P{t.min_period_start || 1}</td>
                   <td>
                     <div style={{ display: 'flex', gap: 6 }}>
@@ -251,9 +277,22 @@ export default function Teachers() {
                   onChange={(e) => setForm((f) => ({ ...f, max_class_level: Number(e.target.value) }))} />
               </div>
               <div className="form-group">
-                <label className="form-label">Workload target</label>
-                <input className="form-input" type="number" min={0} max={288} value={form.allotted_periods}
-                  onChange={(e) => setForm((f) => ({ ...f, allotted_periods: Number(e.target.value) }))} />
+                <label className="form-label">
+                  Workload target
+                  <span style={{ fontWeight: 400, color: 'var(--mid)', marginLeft: 6 }}>(blank = Auto)</span>
+                </label>
+                <input
+                  className="form-input"
+                  type="number"
+                  min={0}
+                  max={288}
+                  value={form.targetInput}
+                  placeholder="Auto — solver decides"
+                  onChange={(e) => setForm((f) => ({ ...f, targetInput: e.target.value }))}
+                />
+                <p className="form-hint">
+                  Enter a number to pin this teacher&apos;s weekly load; leave blank for CP-SAT to balance.
+                </p>
               </div>
             </div>
 
@@ -272,7 +311,7 @@ export default function Teachers() {
               </select>
               <p className="form-hint">
                 Capacity: <strong>{capacity} periods/week</strong>
-                {form.allotted_periods > capacity && (
+                {targetNum > capacity && (
                   <span style={{ color: 'var(--red)', marginLeft: 8 }}>⚠ Target exceeds capacity!</span>
                 )}
               </p>

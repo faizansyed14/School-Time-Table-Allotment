@@ -1,16 +1,17 @@
 const router = require('express').Router();
 const supabase = require('../config/supabase');
-const getPythonCommand = require('../config/python');
 const requireAuth = require('../middleware/auth');
-const { buildAllocationIssues } = require('../lib/allocationIssues');
-const { spawn } = require('child_process');
-const fs = require('fs').promises;
-const path = require('path');
+const { buildPrecheckIssues, buildAllocationIssues } = require('../lib/allocationIssues');
+const {
+  buildSolverPayload,
+  buildTargetChanges,
+  isFixedTarget,
+  runSolver,
+  transformAllocateResult,
+  persistAllocationsAndTargets,
+} = require('../lib/solverBridge');
 
 router.use(requireAuth);
-
-const BACKEND_DIR = path.join(__dirname, '..', '..');   // school-erp/backend
-const SCRIPTS_DIR = path.join(BACKEND_DIR, 'scripts');   // school-erp/backend/scripts
 
 // ── GET all allocations ───────────────────────────────────────
 router.get('/', async (req, res) => {
@@ -99,73 +100,93 @@ router.post('/swap-teacher', async (req, res) => {
 
 // ── GET /validate ─────────────────────────────────────────────
 router.get('/validate', async (_req, res) => {
-  const [subj, classes, teachers, allocs, report, tt] = await Promise.all([
+  const [subj, classes, teachers, report] = await Promise.all([
     supabase.from('subjects').select('*'),
     supabase.from('classes').select('id, name, class_level, class_teacher_id').order('display_order'),
-    supabase.from('teachers').select('id, name, allotted_periods, allocated_periods, min_period_start'),
-    supabase.from('subject_allocations').select('teacher_id, class_id, subject, periods_weekly'),
+    supabase.from('teachers').select('id, name, subjects, min_class_level, max_class_level, allotted_periods, min_period_start'),
     supabase.from('allocation_reports').select('report').eq('id', 1).maybeSingle(),
-    supabase.from('timetable').select('class_id, teacher_id, day, period'),
   ]);
 
+  const lastRun = report.data?.report?.lastRun || null;
   const result = buildAllocationIssues({
     subjects: subj.data,
     classes: classes.data,
     teachers: teachers.data,
-    allocations: allocs.data,
-    lastRun: report.data?.report?.lastRun,
-    timetable: tt.data,
+    lastRun,
   });
   res.json(result);
 });
 
-const { autoGenerateAllocations } = require('../lib/autoGenerator');
-
-// ── POST /auto-generate ───────────────────────────────────────
-// Reads live DB: subjects (curriculum), teachers (targets + subjects + levels), classes (class teachers).
-// Does NOT read existing subject_allocations. On apply=1, replaces all allocation rows.
+// ── POST /auto-generate — CP-SAT Phase A (same engine as Allotment) ──
 router.post('/auto-generate', async (req, res) => {
   const apply = req.query.apply === '1';
   try {
     const [teachersRes, classesRes, subjectsRes] = await Promise.all([
-      supabase.from('teachers').select('id, name, subjects, min_class_level, max_class_level, allotted_periods'),
+      supabase.from('teachers').select('id, name, subjects, min_class_level, max_class_level, allotted_periods, min_period_start'),
       supabase.from('classes').select('id, name, class_level, class_teacher_id').order('display_order'),
       supabase.from('subjects').select('*'),
     ]);
     if (teachersRes.error) throw new Error(teachersRes.error.message);
-    if (classesRes.error)  throw new Error(classesRes.error.message);
+    if (classesRes.error) throw new Error(classesRes.error.message);
     if (subjectsRes.error) throw new Error(subjectsRes.error.message);
 
-    const result = autoGenerateAllocations({
-      teachers: teachersRes.data || [],
-      classes:  classesRes.data  || [],
-      subjects: subjectsRes.data || [],
-    });
+    const teachers = teachersRes.data || [];
+    const classes = classesRes.data || [];
+    const subjects = subjectsRes.data || [];
 
-    if (!result.success) return res.json({ success: false, errors: result.errors, warnings: result.warnings });
+    const wasFixedByName = Object.fromEntries(
+      teachers.map((t) => [t.name, isFixedTarget(t.allotted_periods)]),
+    );
+    const nameToTeacherId = Object.fromEntries(teachers.map((t) => [t.name, t.id]));
+    const payload = buildSolverPayload({ teachers, classes, subjects, mode: 'allocate' });
+
+    const raw = await runSolver(payload);
+    const result = transformAllocateResult(raw, { teachers, classes });
+    const targetChanges = buildTargetChanges(teachers, raw.targets, payload.teachers);
+    const precheckIssues = buildPrecheckIssues({ subjects, classes, teachers });
+
+    if (!result.success) {
+      const issues = buildAllocationIssues({
+        subjects, classes, teachers,
+        lastRun: { success: false, message: result.message, errors: result.errors },
+      }).issues;
+      return res.json({
+        success: false,
+        ok: false,
+        errors: result.errors?.map((e) => e.message) || [result.message],
+        message: result.message,
+        issues,
+        targetChanges,
+      });
+    }
 
     if (apply) {
-      // Clear existing allocations
-      await supabase.from('subject_allocations').delete().neq('teacher_id', '00000000-0000-0000-0000-000000000000');
-      
-      // Insert new allocations in batches
-      for (let i = 0; i < result.allocations.length; i += 100) {
-        const batch = result.allocations.slice(i, i + 100);
-        const { error } = await supabase.from('subject_allocations').insert(batch);
-        if (error) throw new Error(error.message);
-      }
+      await persistAllocationsAndTargets(
+        supabase,
+        { allocations: result.allocations, targets: result.targets },
+        { nameToTeacherId, wasFixedByName },
+      );
     }
 
     res.json({
-      success: true, 
-      applied: apply, 
+      success: true,
+      ok: true,
+      applied: apply,
       count: result.allocations.length,
-      warnings: result.warnings,
+      totalAssigned: result.totalAssigned,
+      totalExpected: result.totalExpected,
+      filled: result.filled,
+      total: result.total,
+      message: result.message,
+      class_summary: result.class_summary,
       allocations: apply ? undefined : result.allocations,
+      targets: result.targets,
+      targetChanges,
+      issues: precheckIssues.filter((i) => i.severity === 'warning'),
     });
   } catch (e) {
     console.error('[AUTO-GENERATE] Error:', e.message);
-    res.status(500).json({ success: false, error: e.message });
+    res.status(500).json({ success: false, error: e.message, errors: [e.message] });
   }
 });
 

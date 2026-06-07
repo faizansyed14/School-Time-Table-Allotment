@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api.js';
 import { DAYS, PERIODS, todayISO } from '../lib/utils.js';
 import { buildMasterMatrix, exportMasterGridExcel } from '../lib/masterGrid.js';
+import { exportClassTimetableExcel, exportTeacherTimetableExcel } from '../lib/timetableExport.js';
 import MasterGridCellEditor from '../components/MasterGridCellEditor.jsx';
 import { Calendar, Loader, Download, Pencil } from 'lucide-react';
 
@@ -44,6 +45,9 @@ function ClassView({ classes }) {
   const [grid, setGrid]         = useState([]);
   const [subBySlot, setSubBySlot] = useState({});
   const [loading, setLoading]   = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  const className = classes.find((c) => c.id === selected)?.name || '';
 
   async function loadSubsForDate(d) {
     try {
@@ -78,6 +82,18 @@ function ClassView({ classes }) {
   const cells = {};
   grid.forEach((r) => { cells[`${r.day}-${r.period}`] = r; });
 
+  function handleExport() {
+    if (!grid.length || !className) return;
+    setExporting(true);
+    try {
+      exportClassTimetableExcel({ className, gridRows: grid, subBySlot });
+    } catch (e) {
+      alert(e.message || 'Export failed');
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <div>
       <div style={{ marginBottom: 14, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -90,6 +106,17 @@ function ClassView({ classes }) {
           <input type="date" className="form-input" style={{ width: 150 }} value={viewDate} onChange={(e) => setViewDate(e.target.value)} />
         </label>
         <span style={{ fontSize: 11, color: 'var(--mid)' }}>Green = substitute assigned on Absences</span>
+        <button
+          type="button"
+          className="btn btn-outline btn-sm"
+          onClick={handleExport}
+          disabled={!selected || loading || exporting || grid.length === 0}
+          style={{ marginLeft: 'auto' }}
+        >
+          {exporting
+            ? <><Loader size={13} className="spinner" /> Exporting…</>
+            : <><Download size={13} /> Export Excel</>}
+        </button>
       </div>
 
       {!selected ? (
@@ -144,6 +171,9 @@ function TeacherView({ teachers }) {
   const [selected, setSelected] = useState('');
   const [grid, setGrid]         = useState([]);
   const [loading, setLoading]   = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  const teacherName = teachers.find((t) => t.id === selected)?.name || '';
 
   async function loadGrid(id) {
     if (!id) return;
@@ -159,14 +189,37 @@ function TeacherView({ teachers }) {
   grid.forEach((r) => { cells[`${r.day}-${r.period}`] = r; });
   const totalPeriods = grid.length;
 
+  function handleExport() {
+    if (!grid.length || !teacherName) return;
+    setExporting(true);
+    try {
+      exportTeacherTimetableExcel({ teacherName, gridRows: grid });
+    } catch (e) {
+      alert(e.message || 'Export failed');
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <div>
-      <div style={{ marginBottom: 14 }}>
+      <div style={{ marginBottom: 14, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <select className="form-select" style={{ width: 220 }} value={selected} onChange={(e) => setSelected(e.target.value)}>
           <option value="">— Select Teacher —</option>
           {teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
-        {selected && !loading && <span style={{ marginLeft: 12, fontSize: 12, color: 'var(--mid)' }}>{totalPeriods} periods/week</span>}
+        {selected && !loading && <span style={{ fontSize: 12, color: 'var(--mid)' }}>{totalPeriods} periods/week</span>}
+        <button
+          type="button"
+          className="btn btn-outline btn-sm"
+          onClick={handleExport}
+          disabled={!selected || loading || exporting || grid.length === 0}
+          style={{ marginLeft: 'auto' }}
+        >
+          {exporting
+            ? <><Loader size={13} className="spinner" /> Exporting…</>
+            : <><Download size={13} /> Export Excel</>}
+        </button>
       </div>
 
       {!selected ? (

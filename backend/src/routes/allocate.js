@@ -1,21 +1,23 @@
 const router = require('express').Router();
 const supabase = require('../config/supabase');
 const requireAuth = require('../middleware/auth');
-const { runTimetableEngine } = require('../lib/timetableEngine');
+const {
+  buildSolverPayload,
+  buildTargetChanges,
+  isFixedTarget,
+  runSolver,
+  transformSolverResult,
+  persistAllocationsAndTargets,
+} = require('../lib/solverBridge');
+const { buildPrecheckIssues, buildAllocationIssues } = require('../lib/allocationIssues');
 
 router.use(requireAuth);
 
-const SUBJECT_MAP = {
-  'English': 'S01', 'Hindi': 'S02', 'Maths': 'S03', 'S.St': 'S04', 'E.V.S': 'S04',
-  'Science': 'S05', 'G.K.': 'S06', 'Drawing': 'S07', 'Computer': 'S08', 'Sanskrit': 'S09',
-  'Games': 'S10', 'Library': 'S11', 'Diary': 'S12', 'I.T.': 'S08',
+const SUBJECT_ID_TO_NAME = {
+  S01: 'English', S02: 'Hindi', S03: 'Maths', S04: 'S.St', S05: 'Science',
+  S06: 'G.K.', S07: 'Drawing', S08: 'Computer', S09: 'Sanskrit', S10: 'Games',
+  S11: 'Library', S12: 'Diary',
 };
-
-// Reverse map for applying timetable
-const SUBJECT_ID_TO_NAME = {};
-Object.entries(SUBJECT_MAP).forEach(([name, id]) => {
-  if (!SUBJECT_ID_TO_NAME[id]) SUBJECT_ID_TO_NAME[id] = name;
-});
 
 async function persistLastRun(lastRun) {
   const { data: existing } = await supabase
@@ -28,6 +30,10 @@ async function persistLastRun(lastRun) {
   });
 }
 
+async function persistSolverOutput(result, ctx) {
+  await persistAllocationsAndTargets(supabase, result, ctx);
+}
+
 // GET /result — last run result + rule flags
 router.get('/result', async (_req, res) => {
   const { data } = await supabase
@@ -37,7 +43,6 @@ router.get('/result', async (_req, res) => {
   res.json({ rules, lastRun, generated_at: data.generated_at });
 });
 
-// PATCH /rules — update rules (kept for backward compat, but rules are now always active)
 router.patch('/rules', async (req, res) => {
   const { rules } = req.body || {};
   const { data: existing } = await supabase
@@ -48,7 +53,6 @@ router.patch('/rules', async (req, res) => {
   res.json({ rules: updated.rules });
 });
 
-// DELETE /result — clear stored lastRun
 router.delete('/result', async (_req, res) => {
   const { data: existing } = await supabase
     .from('allocation_reports').select('report').eq('id', 1).maybeSingle();
@@ -62,74 +66,81 @@ router.delete('/result', async (_req, res) => {
   res.json({ cleared: true });
 });
 
-// GET /status — backward compat (always idle now since JS engine is sync)
 router.get('/status', (_req, res) => {
   res.json({ running: false });
 });
 
-// POST /cancel — no-op for JS engine
 router.post('/cancel', (_req, res) => {
-  res.json({ cancelled: false, message: 'JS engine runs synchronously, nothing to cancel.' });
+  res.json({ cancelled: false, message: 'CP-SAT solver runs synchronously.' });
 });
 
-// ─── POST /run — Main allocator: reads DB directly, runs JS engine, returns result ───
+// POST /run — curriculum + teachers → CP-SAT (allocate + schedule) → persist
 router.post('/run', async (_req, res) => {
   try {
     const startTime = Date.now();
 
-    // 1. Fetch ALL data directly from database
-    const [allocsRes, classesRes, teachersRes] = await Promise.all([
-      supabase.from('subject_allocations').select('teacher_id, class_id, subject, periods_weekly'),
+    const [subjectsRes, classesRes, teachersRes] = await Promise.all([
+      supabase.from('subjects').select('*').order('name'),
       supabase.from('classes').select('id, name, class_level, class_teacher_id').order('display_order'),
-      supabase.from('teachers').select('id, name, subjects, allotted_periods, min_period_start'),
+      supabase.from('teachers').select('id, name, subjects, min_class_level, max_class_level, allotted_periods, min_period_start'),
     ]);
 
-    if (allocsRes.error) throw new Error(`DB error (allocations): ${allocsRes.error.message}`);
+    if (subjectsRes.error) throw new Error(`DB error (subjects): ${subjectsRes.error.message}`);
     if (classesRes.error) throw new Error(`DB error (classes): ${classesRes.error.message}`);
     if (teachersRes.error) throw new Error(`DB error (teachers): ${teachersRes.error.message}`);
 
-    const allocs = allocsRes.data || [];
+    const subjects = subjectsRes.data || [];
     const classes = classesRes.data || [];
-    const teachers = (teachersRes.data || []).map(t => ({
-      ...t,
-      min_period_start: t.min_period_start || 1,
-      allotted_periods: t.allotted_periods || 0,
-    }));
+    const teachers = teachersRes.data || [];
 
-    // 2. Run engine (synchronous, < 5 seconds)
-    const result = runTimetableEngine({
-      teachers,
-      classes,
-      allocations: allocs,
-    });
+    const wasFixedByName = Object.fromEntries(
+      teachers.map((t) => [t.name, isFixedTarget(t.allotted_periods)]),
+    );
+    const nameToTeacherId = Object.fromEntries(teachers.map((t) => [t.name, t.id]));
+    const payload = buildSolverPayload({ teachers, classes, subjects, mode: 'full' });
 
-    const elapsed = Date.now() - startTime;
-    result.elapsed_ms = elapsed;
-    result.message += ` (${elapsed}ms)`;
+    console.log('[CP-SAT] Running two-phase solver…');
+    const raw = await runSolver(payload);
+    const result = transformSolverResult(raw, { teachers, classes });
 
-    console.log(`\n[TIMETABLE ENGINE] ${result.success ? 'SUCCESS' : 'PARTIAL'}: ${result.filled}/${result.total} slots in ${elapsed}ms`);
-    if (result.errors?.length > 0) {
-      console.log(`  Errors: ${result.errors.length}`);
-      result.errors.slice(0, 5).forEach(e => console.log(`    - ${e.message}`));
+    result.targetChanges = buildTargetChanges(teachers, raw.targets, payload.teachers);
+    if (result.success) {
+      result.issues = buildPrecheckIssues({ subjects, classes, teachers })
+        .filter((i) => i.severity === 'warning');
+    } else {
+      result.issues = buildAllocationIssues({
+        subjects, classes, teachers,
+        lastRun: result,
+      }).issues;
     }
-    if (result.warnings?.length > 0) {
-      console.log(`  Warnings: ${result.warnings.length}`);
+    result.elapsed_ms = Date.now() - startTime;
+    if (result.success) {
+      result.message = `${result.message} (${result.elapsed_ms}ms)`;
+      await persistSolverOutput(result, { nameToTeacherId, wasFixedByName });
     }
 
-    // 3. Persist result
+    console.log(`[CP-SAT] ${result.success ? 'SUCCESS' : 'FAILED'}: ${result.filled}/${result.total} in ${result.elapsed_ms}ms`);
+    if (result.errors?.length) {
+      result.errors.slice(0, 5).forEach((e) => console.log(`  - ${e.message}`));
+    }
+
     await persistLastRun(result);
-
-    // 4. Return result directly (synchronous, no polling needed)
     res.json(result);
   } catch (e) {
-    console.error('[TIMETABLE ENGINE] Error:', e.message);
-    const errorResult = { success: false, error: e.message, solver_status_name: 'ENGINE_ERROR' };
+    console.error('[CP-SAT] Error:', e.message);
+    const errorResult = {
+      success: false,
+      error: e.message,
+      solver_status_name: 'ENGINE_ERROR',
+      message: e.message,
+      filled: 0,
+      total: 0,
+    };
     await persistLastRun(errorResult).catch(() => {});
     res.status(500).json(errorResult);
   }
 });
 
-// POST /apply — write result to timetable table
 router.post('/apply', async (req, res) => {
   try {
     const { data: stored } = await supabase
@@ -140,28 +151,29 @@ router.post('/apply', async (req, res) => {
     const grid = result.grid;
     const rows = [];
 
-    // grid shape: { class_id: [ [[ {teacher_id, subject_id} ]] ] }
     for (const [class_id, days] of Object.entries(grid)) {
       for (let d = 0; d < days.length; d++) {
         for (let p = 0; p < days[d].length; p++) {
           const slot = days[d][p];
           if (!slot || !slot.length) continue;
           const entry = slot[0];
-          // subject_id might be the subject name directly (from JS engine) or a code (from old CP-SAT)
           let subjectName = entry.subject_id || entry.subject;
-          // If it's a code like S01, convert to name
           if (subjectName && subjectName.startsWith('S') && SUBJECT_ID_TO_NAME[subjectName]) {
             subjectName = SUBJECT_ID_TO_NAME[subjectName];
           }
-          rows.push({ class_id, teacher_id: entry.teacher_id, day: d + 1, period: p + 1, subject: subjectName });
+          rows.push({
+            class_id,
+            teacher_id: entry.teacher_id,
+            day: d + 1,
+            period: p + 1,
+            subject: subjectName,
+          });
         }
       }
     }
 
-    // Wipe existing timetable
     await supabase.from('timetable').delete().neq('id', '00000000-0000-0000-0000-000000000000');
 
-    // Insert in batches
     for (let i = 0; i < rows.length; i += 200) {
       const { error } = await supabase.from('timetable').insert(rows.slice(i, i + 200));
       if (error) throw new Error(error.message);

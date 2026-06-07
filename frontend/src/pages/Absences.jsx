@@ -2,13 +2,11 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api.js';
 import { todayISO, fmtDate } from '../lib/utils.js';
 import { Plus, Trash2, UserX, AlertCircle, CheckCircle, ChevronDown, ChevronRight } from 'lucide-react';
-import AllotmentIssues from '../components/AllotmentIssues.jsx';
 import SubstituteAssignPanel from '../components/SubstituteAssignPanel.jsx';
 
 export default function Absences() {
   const [absences, setAbsences] = useState([]);
   const [teachers, setTeachers] = useState([]);
-  const [allotment, setAllotment] = useState(null);
   const [date, setDate] = useState(todayISO());
   const [modal, setModal] = useState(false);
   const [form, setForm] = useState({ teacher_id: '', absent_date: todayISO(), reason: '' });
@@ -25,12 +23,10 @@ export default function Absences() {
     Promise.all([
       api.get(`/absences?date=${date}`),
       api.get('/teachers'),
-      api.get('/teachers/allotment-summary').catch(() => null),
     ])
-      .then(([a, t, summary]) => {
+      .then(([a, t]) => {
         setAbsences(a || []);
         setTeachers(t || []);
-        setAllotment(summary);
       })
       .catch(console.error);
   }, [date]);
@@ -128,16 +124,6 @@ export default function Absences() {
         </div>
       </div>
 
-      {allotment && (
-        <div className="card" style={{ marginBottom: 16 }}>
-          <div className="card-header">
-            <span style={{ fontWeight: 600, fontSize: 14 }}>Allotment Summary</span>
-          </div>
-          <div className="card-body">
-            <AllotmentIssues allotment={allotment} maxItems={8} />
-          </div>
-        </div>
-      )}
 
       {absences.length === 0 ? (
         <div className="card" style={{ marginBottom: 16 }}>

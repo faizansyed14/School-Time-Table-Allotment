@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { SUBJECT_OPTIONS } from '../lib/utils.js';
 import { buildRemindersAfterAllocationChange } from '../lib/balanceHints.js';
@@ -9,15 +9,16 @@ import {
   ArrowRightLeft, Users, BookOpen, ChevronDown, ChevronRight,
   Sparkles, Loader, Info, BarChart2, Zap,
 } from 'lucide-react';
+import ResultPanel from '../components/ResultPanel.jsx';
 
+const PERIODS_PER_CLASS = 48;
 const EMPTY = { teacher_id: '', class_id: '', subject: '', periods_weekly: '' };
 
 export default function Allocations() {
-  const [tab, setTab]             = useState(0); // 0=Summary, 1=Browse, 2=Issues
+  const [tab, setTab]             = useState(0); // 0=Summary, 1=Browse
   const [allocs, setAllocs]       = useState([]);
   const [teachers, setTeachers]   = useState([]);
   const [classes, setClasses]     = useState([]);
-  const [timetable, setTimetable] = useState([]);
   const [validation, setValidation] = useState(null);
   const [loading, setLoading]     = useState(true);
   const [search, setSearch]       = useState('');
@@ -35,24 +36,21 @@ export default function Allocations() {
   const [autoResult, setAutoResult] = useState(null);
   const [autoLoading, setAutoLoading] = useState(false);
   const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
   const { setReminder } = useBalanceReminder();
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [a, t, c, v, tt] = await Promise.all([
+      const [a, t, c, v] = await Promise.all([
         api.get('/allocations'),
         api.get('/teachers'),
         api.get('/timetable/classes'),
         api.get('/allocations/validate').catch(() => null),
-        api.get('/timetable').catch(() => []),
       ]);
       setAllocs(a || []);
       setTeachers(t || []);
       setClasses(c || []);
       setValidation(v);
-      setTimetable(tt || []);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   }, []);
@@ -63,33 +61,9 @@ export default function Allocations() {
   const teacherMap = useMemo(() => Object.fromEntries(teachers.map((t) => [t.id, t])), [teachers]);
   const classMap   = useMemo(() => Object.fromEntries(classes.map((c) => [c.id, c])), [classes]);
 
-  // P1 mismatch issues: class teacher NOT scheduled at P1
-  const p1Issues = useMemo(() => {
-    if (!timetable.length) return [];
-    const issues = [];
-    const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat'];
-    classes.forEach((c) => {
-      if (!c.class_teacher_id) return;
-      const ctName = teacherMap[c.class_teacher_id]?.name || 'Class Teacher';
-      DAYS.forEach((day, di) => {
-        const p1slot = timetable.find((s) => s.class_id === c.id && s.day === di + 1 && s.period === 1);
-        if (!p1slot) return;
-        if (p1slot.teacher_id !== c.class_teacher_id) {
-          const actualName = teacherMap[p1slot.teacher_id]?.name || 'Unknown';
-          issues.push({
-            severity: 'warning',
-            class_name: c.name,
-            day,
-            message: `Class ${c.name} ${day}: P1 has ${actualName} but class teacher is ${ctName}.`,
-            actions: [{ page: 'Allotment', label: 'Re-run Allotment with R1 enabled', link: '/allotment' }],
-          });
-        }
-      });
-    });
-    return issues;
-  }, [timetable, classes, teacherMap]);
-
-  // Summary stats per class
+  const precheckIssues = validation?.issues || [];
+  const errorCount = precheckIssues.filter((i) => i.severity === 'error').length;
+  const warningCount = precheckIssues.filter((i) => i.severity === 'warning').length;
   const classSummary = useMemo(() => {
     return classes.map((c) => {
       const rows = allocs.filter((a) => a.class_id === c.id);
@@ -118,15 +92,7 @@ export default function Allocations() {
     });
   }, [teachers, allocs]);
 
-  const allIssues = useMemo(() => [
-    ...(validation?.issues || []),
-    ...p1Issues,
-  ], [validation, p1Issues]);
-
-  const errorCount   = allIssues.filter((i) => i.severity === 'error').length;
-  const warningCount = allIssues.filter((i) => i.severity === 'warning').length;
-
-  // ── actions ────────────────────────────────────────────────
+  // Summary stats per class
   function openAdd(preset = {}) { setForm({ ...EMPTY, ...preset }); setError(''); setModal('add'); }
   function openEdit(row) {
     setForm({ teacher_id: row.teacher_id, class_id: row.class_id, subject: row.subject, periods_weekly: row.periods_weekly });
@@ -196,6 +162,7 @@ export default function Allocations() {
   }
 
   const totalPeriods = allocs.reduce((n, r) => n + r.periods_weekly, 0);
+  const schoolTotal = classes.length * PERIODS_PER_CLASS;
 
   // ── grouped for Browse tab ─────────────────────────────────
   const grouped = useMemo(() => {
@@ -235,14 +202,14 @@ export default function Allocations() {
       .sort((a, b) => (a.level || 0) - (b.level || 0) || a.name.localeCompare(b.name));
   }, [allocs, teachers, classes, groupBy, search, searchParams]);
 
-  const TABS = ['Summary', 'Browse', `Issues ${allIssues.length ? `(${allIssues.length})` : ''}`];
+  const TABS = ['Summary', 'Browse'];
 
   return (
     <div>
       <div className="page-header">
         <div>
           <h2>Allocations</h2>
-          <p>{allocs.length} rows · {totalPeriods}/720 periods assigned</p>
+          <p>{allocs.length} rows · {totalPeriods}/{schoolTotal || '…'} periods assigned</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-outline" onClick={() => { setAutoResult(null); setAutoModal(true); }}>
@@ -262,16 +229,16 @@ export default function Allocations() {
         <StatusPill color={errorCount ? 'red' : 'green'} icon={errorCount ? AlertCircle : CheckCircle}
           label={errorCount ? `${errorCount} error${errorCount !== 1 ? 's' : ''}` : 'No errors'} />
         {warningCount > 0 && <StatusPill color="amber" icon={AlertCircle} label={`${warningCount} warning${warningCount !== 1 ? 's' : ''}`} />}
-        <StatusPill color="blue" icon={BarChart2} label={`${totalPeriods}/720 periods`} />
-        <StatusPill color={totalPeriods === 720 ? 'green' : 'gray'} icon={CheckCircle}
-          label={totalPeriods === 720 ? 'All classes balanced' : `${720 - totalPeriods} periods missing`} />
+        <StatusPill color="blue" icon={BarChart2} label={`${totalPeriods}/${schoolTotal || '…'} periods`} />
+        <StatusPill color={schoolTotal > 0 && totalPeriods === schoolTotal ? 'green' : 'gray'} icon={CheckCircle}
+          label={schoolTotal > 0 && totalPeriods === schoolTotal ? 'All classes balanced' : `${Math.max(0, schoolTotal - totalPeriods)} periods missing`} />
       </div>
 
       <div className="alert alert-amber" style={{ marginBottom: 12, fontSize: 12 }}>
         <Info size={13} style={{ flexShrink: 0 }} />
         <span>
-          <b>Balance rule:</b> Every change here must match <b>Curriculum</b> (periods per class per subject) and <b>Teachers</b> (allotted target = sum of that teacher&apos;s rows).
-          Class = 48p, school = 720p. After saving, a checklist appears at the top of every page until you dismiss it.
+          <b>Balance rule:</b> Rows must match <b>Curriculum</b> (periods per class per subject).
+          Each class = {PERIODS_PER_CLASS}p. Auto targets are decided by CP-SAT at generate time.
         </span>
       </div>
 
@@ -287,7 +254,7 @@ export default function Allocations() {
         </div>
       ) : tab === 0 ? (
         <SummaryTab classSummary={classSummary} teacherSummary={teacherSummary} teacherMap={teacherMap} onEdit={openAdd} />
-      ) : tab === 1 ? (
+      ) : (
         <BrowseTab
           grouped={grouped} groupBy={groupBy} setGroupBy={setGroupBy}
           search={search} setSearch={setSearch}
@@ -295,8 +262,6 @@ export default function Allocations() {
           openAdd={openAdd} openEdit={openEdit} setDeleteRow={setDeleteRow}
           allocs={allocs} totalPeriods={totalPeriods}
         />
-      ) : (
-        <IssuesTab issues={allIssues} navigate={navigate} />
       )}
 
       {/* Modals */}
@@ -395,66 +360,45 @@ export default function Allocations() {
 
       {autoModal && (
         <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setAutoModal(false)}>
-          <div className="modal" style={{ maxWidth: 520 }}>
+          <div className="modal" style={{ maxWidth: 640 }}>
             <h2 className="modal-title">Auto-Generate Allocations</h2>
             <p style={{ fontSize: 13, color: 'var(--mid)', marginBottom: 10 }}>
-              Uses live data from <b>Curriculum</b> (periods per class), <b>Teachers</b> (subjects, targets, levels),
-              and <b>Classes</b> (class teachers). Does <b>not</b> copy existing allocation rows.
-              The built-in engine builds a new set; each class totals 48 periods/week.
+              Uses the same CP-SAT engine as <b>Allotment</b> (Phase A only). Reads live
+              <b> Curriculum</b>, <b>Teachers</b> (subjects, levels, pinned targets), and <b>Classes</b> (class teachers).
+              Blank teacher target = Auto (solver decides). Pinned number = fixed.
             </p>
             <p style={{ fontSize: 12, color: 'var(--mid)', marginBottom: 10 }}>
-              Prerequisite: sum of teacher targets = 720, each class curriculum = 48, class teachers set on Classes page.
-              Run <b>Preview</b> first; fix any red errors on Teachers/Curriculum before Apply.
+              Prerequisites: each class curriculum = {PERIODS_PER_CLASS} periods, class teachers assigned, subject coverage OK.
+              Run <b>Preview</b> first.
             </p>
             <div className="alert alert-amber" style={{ marginBottom: 14 }}>
               <Zap size={13} style={{ marginRight: 5 }} /> <b>Apply</b> will delete all existing allocations and replace them.
             </div>
 
-            {!autoResult && (
+            {!autoResult && !autoLoading && (
               <button className="btn btn-outline" onClick={() => runAutoGenerate(false)} disabled={autoLoading}>
-                {autoLoading
-                  ? <><Loader size={13} className="spinner" /> Computing…</>
-                  : 'Preview (no database changes)'}
+                Preview (no database changes)
               </button>
             )}
 
-            {autoResult && (
-              autoResult.success ? (
-                <div>
-                  <div className="alert alert-green">
-                    <CheckCircle size={13} />
-                    <b>{autoResult.applied ? 'Applied' : 'Preview'}: {autoResult.count} allocations generated</b>
-                  </div>
-                  {autoResult.warnings?.length > 0 && (
-                    <div className="alert alert-amber" style={{ marginTop: 8 }}>
-                      <AlertCircle size={13} />
-                      <div>
-                        {autoResult.warnings.length} warning(s):
-                        <ul style={{ margin: '4px 0 0 16px', fontSize: 12 }}>
-                          {autoResult.warnings.slice(0, 5).map((w, i) => <li key={i}>{w}</li>)}
-                        </ul>
-                      </div>
-                    </div>
-                  )}
-                  {!autoResult.applied && (
-                    <button className="btn btn-primary" style={{ marginTop: 10 }}
-                      onClick={() => runAutoGenerate(true)} disabled={autoLoading}>
-                      {autoLoading ? 'Applying…' : 'Apply to database'}
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <div className="alert alert-red">
-                  <AlertCircle size={13} />
-                  <div>
-                    Cannot auto-generate:
-                    <ul style={{ margin: '4px 0 0 16px', fontSize: 12 }}>
-                      {(autoResult.errors || [autoResult.error]).filter(Boolean).map((e, i) => <li key={i}>{e}</li>)}
-                    </ul>
-                  </div>
-                </div>
-              )
-            )}
+            <ResultPanel
+              result={autoResult}
+              mode="allocate"
+              loading={autoLoading}
+              classes={classes}
+              teachers={teachers}
+            >
+              {autoResult?.success && !autoResult.applied && (
+                <button
+                  className="btn btn-primary"
+                  style={{ marginTop: 10 }}
+                  onClick={() => runAutoGenerate(true)}
+                  disabled={autoLoading}
+                >
+                  {autoLoading ? 'Applying…' : 'Apply to database'}
+                </button>
+              )}
+            </ResultPanel>
 
             <div className="modal-footer">
               {autoResult && !autoResult.applied && (
@@ -668,63 +612,6 @@ function BrowseTab({ grouped, groupBy, setGroupBy, search, setSearch, collapsed,
           </div>
         );
       })}
-    </div>
-  );
-}
-
-// ── Issues Tab ────────────────────────────────────────────────
-function IssuesTab({ issues, navigate }) {
-  if (issues.length === 0) {
-    return (
-      <div className="card">
-        <div className="empty-state">
-          <CheckCircle size={32} style={{ color: 'var(--green)', opacity: 1 }} />
-          <h3 style={{ color: 'var(--green)' }}>No issues found</h3>
-          <p>All allocations are valid and P1 slots match class teachers.</p>
-        </div>
-      </div>
-    );
-  }
-
-  const errors   = issues.filter((i) => i.severity === 'error');
-  const warnings = issues.filter((i) => i.severity === 'warning');
-  const infos    = issues.filter((i) => i.severity === 'info');
-
-  return (
-    <div>
-      {[['Errors', errors, 'error'], ['Warnings', warnings, 'warning'], ['Info', infos, 'info']].map(([title, list, sev]) =>
-        list.length === 0 ? null : (
-          <div key={sev} style={{ marginBottom: 20 }}>
-            <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: sev === 'error' ? 'var(--red)' : sev === 'warning' ? 'var(--amber)' : 'var(--blue)' }}>
-              {title} ({list.length})
-            </h3>
-            {list.map((issue, i) => (
-              <div key={i} className={`issue-card ${sev}`} style={{ marginBottom: 8 }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                  <AlertCircle size={14} style={{ marginTop: 1, flexShrink: 0, color: sev === 'error' ? 'var(--red)' : sev === 'warning' ? 'var(--amber)' : 'var(--blue)' }} />
-                  <div style={{ flex: 1 }}>
-                    <p style={{ fontSize: 13, margin: 0 }}>{issue.message}</p>
-                    {issue.actions?.length > 0 && (
-                      <div className="issue-actions">
-                        {issue.actions.map((act, j) => (
-                          <a key={j}
-                             href={act.link || '#'}
-                             onClick={(e) => { if (act.link?.startsWith('/')) { e.preventDefault(); navigate(act.link); }}}
-                             className="issue-action-btn"
-                             style={{ color: sev === 'error' ? 'var(--red)' : sev === 'warning' ? 'var(--amber)' : 'var(--blue)',
-                                      borderColor: sev === 'error' ? '#fca5a5' : sev === 'warning' ? '#fcd34d' : '#bfdbfe' }}>
-                            {act.page} → {act.label}
-                          </a>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )
-      )}
     </div>
   );
 }

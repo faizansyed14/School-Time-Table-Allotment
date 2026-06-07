@@ -26,8 +26,10 @@ pnpm-debug.log*
 # Runtime / allocator temp (regenerated on each run)
 backend/.autogen_input.json
 backend/.autogen_output.json
+backend/.autogen_test_out.json
 database/.cp_runtime_seed.json
 database/.cp_runtime_result.json
+database/.cp_test_*.json
 
 # Python
 __pycache__/

@@ -1,17 +1,19 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
-import { Play, Check, AlertCircle, Loader, ArrowRight, RefreshCw, CheckCircle, BarChart2, ChevronDown, ChevronUp, Zap, Clock } from 'lucide-react';
+import { Check, Loader, RefreshCw, BarChart2, Zap } from 'lucide-react';
 import AllotmentSummaryPanel from '../components/AllotmentSummaryPanel.jsx';
+import ResultPanel from '../components/ResultPanel.jsx';
 
 export default function Allotment() {
-  const [rules, setRules] = useState({ R1: true, R2: true });
   const [lastRun, setLastRun] = useState(null);
   const [genAt, setGenAt] = useState(null);
   const [running, setRunning] = useState(false);
   const [applying, setApplying] = useState(false);
   const [validation, setValidation] = useState(null);
   const [allotment, setAllotment] = useState(null);
+  const [classes, setClasses] = useState([]);
+  const [teachers, setTeachers] = useState([]);
   const [showSummary, setShowSummary] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const navigate = useNavigate();
@@ -31,14 +33,18 @@ export default function Allotment() {
   }, []);
 
   const loadState = useCallback(async () => {
-    const [result, val, summary] = await Promise.all([
+    const [result, val, summary, cls, tch] = await Promise.all([
       api.get('/allocate/result').catch(() => null),
       api.get('/allocations/validate').catch(() => null),
       api.get('/teachers/allotment-summary').catch(() => null),
+      api.get('/timetable/classes').catch(() => []),
+      api.get('/teachers').catch(() => []),
     ]);
-    if (result) { setRules(result.rules || { R1: true, R2: true }); setLastRun(result.lastRun); setGenAt(result.generated_at); }
+    if (result) { setLastRun(result.lastRun); setGenAt(result.generated_at); }
     setValidation(val);
     setAllotment(summary);
+    setClasses(cls || []);
+    setTeachers(tch || []);
     return summary;
   }, []);
 
@@ -67,7 +73,7 @@ export default function Allotment() {
       }
       await loadState();
     } catch (e) {
-      alert(`Engine error: ${e.message}`);
+      setLastRun({ success: false, message: e.message, errors: [{ message: e.message }] });
     } finally {
       setRunning(false);
     }
@@ -91,22 +97,16 @@ export default function Allotment() {
     if (next && !allotment) await loadSummary();
   }
 
-  const criticalIssues = (allotment?.issues || validation?.issues || []).filter((i) => i.severity === 'error');
-
-  // Only block the button for REAL data errors (curriculum, capacity etc.)
-  // Don't block it for 'timetable_solver_failed' - those are just records of the last failure.
-  const dataErrors = criticalIssues.filter(i => 
-    !['timetable_solver_failed', 'timetable_partial', 'class_timetable_short', 'timetable_preflight_fatal'].includes(i.type)
-  );
-  
-  const canRun = dataErrors.length === 0 && !running;
+  const precheckIssues = validation?.issues || [];
+  const precheckErrors = precheckIssues.filter((i) => i.severity === 'error');
+  const canRun = precheckErrors.length === 0 && !running;
 
   return (
     <div>
       <div className="page-header">
         <div>
           <h2>Allotment</h2>
-          <p>Generate the complete school timetable using the built-in engine.</p>
+          <p>Generate allocations + timetable from Curriculum (CP-SAT — deterministic).</p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           {lastRun && (
@@ -121,190 +121,75 @@ export default function Allotment() {
         </div>
       </div>
 
-      {!showSummary && lastRun?.success && (
-        <div className="alert alert-green" style={{ marginBottom: 16, fontSize: 13 }}>
-          <CheckCircle size={14} />
-          Run complete — {lastRun.filled}/{lastRun.total} slots.
-          <button type="button" className="btn btn-outline btn-sm" style={{ marginLeft: 10 }} onClick={() => { setShowSummary(true); loadSummary(); }}>
-            View allotment summary
-          </button>
-        </div>
-      )}
-
       {showSummary && (
         <AllotmentSummaryPanel
           allotment={allotment}
-          navigate={navigate}
           onRefresh={() => loadSummary()}
           loading={summaryLoading}
         />
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-        {/* Validation status */}
         <div className="card">
           <div className="card-header">
-            <span style={{ fontWeight: 600, fontSize: 14 }}>Data Status</span>
+            <span style={{ fontWeight: 600, fontSize: 14 }}>Data pre-check</span>
             <button className="btn btn-ghost btn-sm" onClick={loadState}><RefreshCw size={12} /></button>
           </div>
-          <div className="card-body">
+          <div className="card-body" style={{ paddingTop: 8 }}>
             {!validation ? (
-              <div style={{ color: 'var(--mid)', fontSize: 13 }}>Checking…</div>
-            ) : validation.ok ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--green)', fontWeight: 600, fontSize: 14 }}>
-                <CheckCircle size={18} /> All allocations valid
-              </div>
+              <p style={{ fontSize: 13, color: 'var(--mid)' }}>Checking…</p>
             ) : (
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: criticalIssues.length === dataErrors.length ? 'var(--red)' : 'var(--orange)', fontWeight: 600, fontSize: 14, marginBottom: 10 }}>
-                  <AlertCircle size={18} /> {criticalIssues.length} issue{criticalIssues.length !== 1 ? 's' : ''} detected
-                </div>
-                {/* Show only first 5 errors */}
-                {criticalIssues.slice(0, 5).map((issue, i) => {
-                  const isResultError = ['timetable_solver_failed', 'timetable_partial', 'class_timetable_short', 'timetable_preflight_fatal'].includes(issue.type);
-                  return (
-                    <div key={i} className={`issue-card ${isResultError ? 'warning' : 'error'}`} style={{ marginBottom: 6, opacity: isResultError ? 0.8 : 1 }}>
-                      <span style={{ fontSize: 12, fontWeight: 500 }}>{issue.message}</span>
-                      {issue.actions?.length > 0 && (
-                        <div className="issue-actions" style={{ marginTop: 6 }}>
-                          {issue.actions.map((act, j) => (
-                            <a key={j} href="#" className="issue-action-btn"
-                              style={{ fontSize: 11 }}
-                              onClick={(e) => { e.preventDefault(); if (act.link) navigate(act.link); }}>
-                              {act.page} → {act.label}
-                            </a>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+              <ResultPanel precheckIssues={precheckIssues} mode="allocate" />
             )}
           </div>
         </div>
 
-        {/* Rules (always-on info) */}
         <div className="card">
           <div className="card-header"><span style={{ fontWeight: 600, fontSize: 14 }}>Timetable Rules (Always Active)</span></div>
           <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <RuleInfo label="R1 — Class Teacher at Period 1" hint="Class teacher teaches the first period of the day in their class, every day." />
+            <RuleInfo label="R1 — Class Teacher at Period 1" hint="Class teacher teaches P1 in their class, every day." />
             <RuleInfo label="R2 — Diary at Period 8 (Classes 1–2)" hint="Last period = Diary for Classes 1A, 1B, 2A, 2B." />
-            <RuleInfo label="R3 — No Teacher Conflicts" hint="A teacher can only be in one class at any given day+period." />
-            <RuleInfo label="R4 — Teacher Period Restriction" hint="Each teacher's 'Starts from' setting is respected (set in Teacher page)." />
+            <RuleInfo label="R3 — No Teacher Conflicts" hint="One teacher, one class per slot." />
+            <RuleInfo label="R4 — Teacher Period Restriction" hint="Respects each teacher's 'Starts from' setting." />
           </div>
         </div>
       </div>
 
-      {/* Run section */}
       <div className="card">
         <div className="card-header"><span style={{ fontWeight: 600, fontSize: 14 }}>Run Allocator</span></div>
         <div className="card-body">
-          {dataErrors.length > 0 ? (
-            <div className="alert alert-red" style={{ marginBottom: 14 }}>
-              <AlertCircle size={13} /> Fix the {dataErrors.length} critical data errors above to enable generation.
-            </div>
-          ) : criticalIssues.length > 0 && (
-            <div className="alert alert-orange" style={{ marginBottom: 14, fontSize: 13 }}>
-              Note: Issues from the previous run are shown above. You can try generating again with different rules or data.
-            </div>
+          {precheckErrors.length > 0 && (
+            <p style={{ fontSize: 13, color: 'var(--red)', marginBottom: 12 }}>
+              Fix {precheckErrors.length} data error{precheckErrors.length !== 1 ? 's' : ''} above before running.
+            </p>
           )}
 
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: lastRun ? 16 : 0, flexWrap: 'wrap' }}>
-            <button className="btn btn-primary" onClick={runSolver} disabled={!canRun || running} style={{ minWidth: 200 }}>
-              {running
-                ? <><Loader size={13} className="spinner" /> Generating…</>
-                : <><Zap size={13} /> Generate Timetable</>}
-            </button>
-          </div>
+          <button className="btn btn-primary" onClick={runSolver} disabled={!canRun || running} style={{ minWidth: 200 }}>
+            {running
+              ? <><Loader size={13} className="spinner" /> Generating…</>
+              : <><Zap size={13} /> Generate Timetable</>}
+          </button>
 
-          {running && (
-            <div style={{ marginTop: 12, fontSize: 12, color: 'var(--mid)' }}>
-              <Loader size={12} className="spinner" style={{ verticalAlign: 'middle', marginRight: 6 }} />
-              Engine is running… this takes about 2-5 seconds.
-            </div>
-          )}
-
-          {/* Result */}
-          {lastRun && (
-            <div style={{ marginTop: 16 }}>
-              {lastRun.success ? (
-                <div>
-                  <div className="alert alert-green" style={{ marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <CheckCircle size={13} />
-                      <b>COMPLETE — {lastRun.filled}/{lastRun.total} slots filled</b>
-                      {genAt && <span style={{ marginLeft: 8, fontSize: 11, opacity: 0.8 }}>at {new Date(genAt).toLocaleTimeString('en-IN')}</span>}
-                    </div>
-                    {lastRun.elapsed_ms != null && (
-                      <div style={{
-                        background: 'rgba(52, 211, 153, 0.2)',
-                        padding: '2px 8px',
-                        borderRadius: 4,
-                        fontSize: 11,
-                        fontWeight: 600,
-                        color: '#065f46',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4,
-                      }}>
-                        <Clock size={10} />
-                        {lastRun.elapsed_ms}ms
-                      </div>
-                    )}
-                  </div>
-
-                  {lastRun.warnings?.length > 0 && (
-                    <div className="alert alert-amber" style={{ marginBottom: 14 }}>
-                      <AlertCircle size={13} />
-                      <div>
-                        {lastRun.warnings.length} warning(s):
-                        <ul style={{ margin: '4px 0 0 16px', fontSize: 12 }}>
-                          {lastRun.warnings.slice(0, 10).map((w, i) => <li key={i}>{w.message || w.reason}</li>)}
-                        </ul>
-                      </div>
-                    </div>
-                  )}
-
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    <button type="button" className="btn btn-outline" onClick={() => { setShowSummary(true); loadSummary(); }}>
-                      <BarChart2 size={13} /> View allotment summary
-                    </button>
-                    <button type="button" className="btn btn-primary" onClick={applyTimetable} disabled={applying}>
-                      {applying ? <><Loader size={13} className="spinner" /> Applying…</> : <><Check size={13} /> Apply to Timetable</>}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div>
-                  <div className="alert alert-red" style={{ marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
-                    <span>
-                      <AlertCircle size={13} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-                      <b>{lastRun.solver_status_name || 'Failed'} — {lastRun.filled}/{lastRun.total} slots</b>
-                    </span>
-                    <button type="button" className="btn btn-outline btn-sm" onClick={clearLastResult} disabled={running}>
-                      Clear result
-                    </button>
-                  </div>
-                  {lastRun.message && (
-                    <pre style={{ fontSize: 12, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, padding: 12, whiteSpace: 'pre-wrap', fontFamily: 'inherit', color: 'var(--dark)' }}>
-                      {lastRun.message}
-                    </pre>
-                  )}
-                  {lastRun.errors?.length > 0 && (
-                    <div style={{ marginTop: 10 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Issues found:</div>
-                      {lastRun.errors.map((e, i) => (
-                        <div key={i} className="issue-card error" style={{ marginBottom: 6 }}>
-                          <span style={{ fontSize: 12 }}>{e.message}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+          <ResultPanel
+            result={lastRun}
+            mode="full"
+            loading={running}
+            precheckIssues={[]}
+            classes={classes}
+            teachers={teachers}
+            genAt={genAt}
+          >
+            {lastRun?.success && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 16 }}>
+                <button type="button" className="btn btn-outline" onClick={() => { setShowSummary(true); loadSummary(); }}>
+                  <BarChart2 size={13} /> Teacher summary
+                </button>
+                <button type="button" className="btn btn-primary" onClick={applyTimetable} disabled={applying}>
+                  {applying ? <><Loader size={13} className="spinner" /> Applying…</> : <><Check size={13} /> Apply to Timetable</>}
+                </button>
+              </div>
+            )}
+          </ResultPanel>
         </div>
       </div>
     </div>
@@ -313,12 +198,9 @@ export default function Allotment() {
 
 function RuleInfo({ label, hint }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-      <CheckCircle size={14} style={{ color: 'var(--green)', flexShrink: 0, marginTop: 2 }} />
-      <div>
-        <div style={{ fontSize: 13, fontWeight: 600 }}>{label}</div>
-        <div style={{ fontSize: 11, color: 'var(--mid)', marginTop: 2 }}>{hint}</div>
-      </div>
+    <div>
+      <div style={{ fontSize: 13, fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: 11, color: 'var(--mid)', marginTop: 2 }}>{hint}</div>
     </div>
   );
 }

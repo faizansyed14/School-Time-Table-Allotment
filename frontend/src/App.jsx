@@ -13,6 +13,7 @@ import Allocations from './pages/Allocations.jsx';
 import Teachers    from './pages/Teachers.jsx';
 import Allotment   from './pages/Allotment.jsx';
 import Guide       from './pages/Guide.jsx';
+import UsersPage    from './pages/Users.jsx';
 
 function Guard({ children }) {
   const { user, loading } = useAuth();
@@ -40,6 +41,7 @@ export default function App() {
             <Route path="allocations" element={<Allocations />} />
             <Route path="teachers"    element={<Teachers />} />
             <Route path="allotment"   element={<Allotment />} />
+            <Route path="users"       element={<UsersPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/guide" replace />} />
         </Routes>

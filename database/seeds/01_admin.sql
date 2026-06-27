@@ -1,5 +1,9 @@
--- ── Seed 01: Admin User ─────────────────────────────────────
--- Password: admin123 (bcrypt hash)
-INSERT INTO admins (username, password_hash)
-VALUES ('admin', '$2b$10$ibHHFTmoaqYBo6MeCXL8i.r0E48hG0pSHIzB/1amixCLmA7shajLe')
+-- ── Seed 01: Admin User (RBAC) ──────────────────────────────
+-- NOTE: The API seeds the admin automatically on startup using
+--       ADMIN_USERNAME / ADMIN_PASSWORD from the .env file.
+--       This file is only for manual seeding via psql.
+--
+-- Default credentials: admin / admin  (change in production!)
+INSERT INTO users (username, password_hash, role)
+VALUES ('admin', crypt('admin', gen_salt('bf', 10)), 'admin')
 ON CONFLICT (username) DO NOTHING;

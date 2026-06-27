@@ -25,12 +25,21 @@ export function apiConfigError() {
   return 'API URL not set. On Render static site add VITE_API_URL (your backend URL) and redeploy.';
 }
 
-/** Login — no Bearer header; body must be JSON string */
-export async function loginApi(username, password) {
+/** Fetch a fresh captcha (image + id). Called after the password is entered. */
+export async function getCaptchaApi() {
+  const cfgErr = apiConfigError();
+  if (cfgErr) throw new Error(cfgErr);
+  const res = await fetch(apiUrl('/auth/captcha'), { method: 'GET' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Could not load captcha (HTTP ${res.status})`);
+  return data; // { captcha_id, image }
+}
+
+async function postAuth(path, payload, failMsg) {
   const cfgErr = apiConfigError();
   if (cfgErr) throw new Error(cfgErr);
 
-  const url = apiUrl('/auth/login');
+  const url = apiUrl(path);
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), 90000);
 
@@ -39,15 +48,12 @@ export async function loginApi(username, password) {
     res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        username: String(username),
-        password: String(password),
-      }),
+      body: JSON.stringify(payload),
       signal: ac.signal,
     });
   } catch (e) {
     if (e.name === 'AbortError') {
-      throw new Error('API timed out (Render free tier may be waking up). Wait 1 minute and try again.');
+      throw new Error('API timed out (server may be waking up). Wait a minute and try again.');
     }
     throw new Error(`Cannot reach API at ${url}. Check VITE_API_URL and that the backend is live.`);
   } finally {
@@ -55,10 +61,22 @@ export async function loginApi(username, password) {
   }
 
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(data.error || `Login failed (HTTP ${res.status})`);
-  }
+  if (!res.ok) throw new Error(data.error || `${failMsg} (HTTP ${res.status})`);
   return data;
+}
+
+/** Step 1 — verify username + password. Returns { challenge, captcha:{captcha_id,image} }. */
+export async function verifyPasswordApi(username, password) {
+  return postAuth('/auth/password',
+    { username: String(username), password: String(password) },
+    'Sign in failed');
+}
+
+/** Step 2 — verify captcha against the challenge from step 1. Returns { token, username, role }. */
+export async function loginApi({ challenge, captcha_id, captcha_text }) {
+  return postAuth('/auth/login',
+    { challenge: String(challenge || ''), captcha_id: String(captcha_id || ''), captcha_text: String(captcha_text || '') },
+    'Login failed');
 }
 
 async function request(method, path, body) {

@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
-import { Check, Loader, RefreshCw, BarChart2, Zap } from 'lucide-react';
+import { Check, Loader, RefreshCw, BarChart2, Zap, Sparkles } from 'lucide-react';
 import AllotmentSummaryPanel from '../components/AllotmentSummaryPanel.jsx';
 import ResultPanel from '../components/ResultPanel.jsx';
+import Modal from '../components/Modal.jsx';
+import LoadingOverlay from '../components/LoadingOverlay.jsx';
 
 export default function Allotment() {
   const [lastRun, setLastRun] = useState(null);
@@ -14,8 +16,10 @@ export default function Allotment() {
   const [allotment, setAllotment] = useState(null);
   const [classes, setClasses] = useState([]);
   const [teachers, setTeachers] = useState([]);
+  const [subjects, setSubjects] = useState([]);
   const [showSummary, setShowSummary] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
+  const [runMode, setRunMode] = useState('auto'); // for the loading overlay text
   const navigate = useNavigate();
 
   const loadSummary = useCallback(async () => {
@@ -33,18 +37,20 @@ export default function Allotment() {
   }, []);
 
   const loadState = useCallback(async () => {
-    const [result, val, summary, cls, tch] = await Promise.all([
+    const [result, val, summary, cls, tch, subj] = await Promise.all([
       api.get('/allocate/result').catch(() => null),
       api.get('/allocations/validate').catch(() => null),
       api.get('/teachers/allotment-summary').catch(() => null),
       api.get('/timetable/classes').catch(() => []),
       api.get('/teachers').catch(() => []),
+      api.get('/subjects').catch(() => []),
     ]);
     if (result) { setLastRun(result.lastRun); setGenAt(result.generated_at); }
     setValidation(val);
     setAllotment(summary);
     setClasses(cls || []);
     setTeachers(tch || []);
+    setSubjects(subj || []);
     return summary;
   }, []);
 
@@ -62,15 +68,30 @@ export default function Allotment() {
   }
 
   async function runSolver() {
+    setRunMode('schedule');
     setRunning(true);
     setLastRun(null);
     try {
       const result = await api.post('/allocate/run');
       setLastRun(result);
-      if (result.success) {
-        setShowSummary(true);
-        await loadSummary();
-      }
+      if (result.success) await loadSummary();
+      await loadState();
+    } catch (e) {
+      setLastRun({ success: false, message: e.message, errors: [{ message: e.message }] });
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  async function autoAllot() {
+    // One-click: generate allocations + schedule + apply to timetable.
+    setRunMode('auto');
+    setRunning(true);
+    setLastRun(null);
+    try {
+      const result = await api.post('/allocate/auto');
+      setLastRun(result);
+      if (result.success) await loadSummary();
       await loadState();
     } catch (e) {
       setLastRun({ success: false, message: e.message, errors: [{ message: e.message }] });
@@ -84,17 +105,15 @@ export default function Allotment() {
     try {
       const r = await api.post('/allocate/apply');
       await loadState();
-      setShowSummary(true);
       alert(`Timetable applied: ${r.slots_inserted} slots inserted.`);
       navigate('/timetable');
     } catch (e) { alert(e.message); }
     finally { setApplying(false); }
   }
 
-  async function toggleSummary() {
-    const next = !showSummary;
-    setShowSummary(next);
-    if (next && !allotment) await loadSummary();
+  async function openSummary() {
+    setShowSummary(true);
+    if (!allotment) await loadSummary();
   }
 
   const precheckIssues = validation?.issues || [];
@@ -106,7 +125,7 @@ export default function Allotment() {
       <div className="page-header">
         <div>
           <h2>Allotment</h2>
-          <p>Schedule saved allocations into the weekly grid (Phase B — R1–R5). Generate or edit the plan on Allocations first.</p>
+          <p>One-click Auto Allotment, or schedule the allocations you edited on the Allocations page. Same teacher/subject is kept in the same period every day where the rules allow.</p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           {lastRun && (
@@ -114,20 +133,38 @@ export default function Allotment() {
               <RefreshCw size={14} /> Clear Result
             </button>
           )}
-          <button type="button" className="btn btn-outline" onClick={toggleSummary}>
-            <BarChart2 size={14} />
-            {showSummary ? 'Hide summary' : 'View summary'}
+          <button type="button" className="btn btn-outline" onClick={openSummary}>
+            <BarChart2 size={14} /> View summary
           </button>
         </div>
       </div>
 
-      {showSummary && (
+      <LoadingOverlay
+        open={running}
+        title={runMode === 'auto' ? 'Generating allotment…' : 'Scheduling timetable…'}
+        message="The solver is placing periods under all rules. This can take up to a minute."
+      />
+
+      <Modal
+        open={showSummary}
+        onClose={() => setShowSummary(false)}
+        title="Allotment summary"
+        size="xl"
+        footer={(
+          <>
+            <button className="btn btn-outline btn-sm" onClick={() => loadSummary()} disabled={summaryLoading}>
+              <RefreshCw size={13} /> Refresh
+            </button>
+            <button className="btn btn-primary btn-sm" onClick={() => setShowSummary(false)}>Close</button>
+          </>
+        )}
+      >
         <AllotmentSummaryPanel
           allotment={allotment}
           onRefresh={() => loadSummary()}
           loading={summaryLoading}
         />
-      )}
+      </Modal>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
         <div className="card">
@@ -164,11 +201,22 @@ export default function Allotment() {
             </p>
           )}
 
-          <button className="btn btn-primary" onClick={runSolver} disabled={!canRun || running} style={{ minWidth: 200 }}>
-            {running
-              ? <><Loader size={13} className="spinner" /> Scheduling…</>
-              : <><Zap size={13} /> Schedule Timetable</>}
-          </button>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            <button className="btn btn-primary" onClick={autoAllot} disabled={running} style={{ minWidth: 220 }}>
+              {running
+                ? <><Loader size={13} className="spinner" /> Working…</>
+                : <><Sparkles size={13} /> Auto Allotment (one-click)</>}
+            </button>
+            <button className="btn btn-outline" onClick={runSolver} disabled={!canRun || running} style={{ minWidth: 200 }}>
+              {running
+                ? <><Loader size={13} className="spinner" /> Scheduling…</>
+                : <><Zap size={13} /> Schedule Saved Allocations</>}
+            </button>
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--mid)', marginTop: 8 }}>
+            <strong>Auto Allotment</strong> generates allocations, schedules them and applies the timetable in one step.
+            Use <strong>Schedule Saved Allocations</strong> to keep allocations you entered/edited manually.
+          </p>
 
           <ResultPanel
             result={lastRun}
@@ -177,11 +225,12 @@ export default function Allotment() {
             precheckIssues={[]}
             classes={classes}
             teachers={teachers}
+            subjects={subjects}
             genAt={genAt}
           >
             {lastRun?.success && (
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 16 }}>
-                <button type="button" className="btn btn-outline" onClick={() => { setShowSummary(true); loadSummary(); }}>
+                <button type="button" className="btn btn-outline" onClick={openSummary}>
                   <BarChart2 size={13} /> Teacher summary
                 </button>
                 <button type="button" className="btn btn-primary" onClick={applyTimetable} disabled={applying}>

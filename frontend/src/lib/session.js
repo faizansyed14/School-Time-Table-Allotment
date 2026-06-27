@@ -8,6 +8,7 @@ export function registerSessionClear(fn) {
 export function clearStoredSession() {
   localStorage.removeItem('erp_token');
   localStorage.removeItem('erp_username');
+  localStorage.removeItem('erp_role');
 }
 
 export function isTokenExpired(token) {

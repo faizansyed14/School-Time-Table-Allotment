@@ -1,29 +1,35 @@
-# Render Blueprint — two services (API + static frontend)
-# Dashboard: New > Blueprint > connect repo, or add services manually using DEPLOY.md
+# Render Blueprint — Python (FastAPI) API + static frontend.
+# Database is provided externally (AWS RDS / Supabase) via DATABASE_URL.
+# For a fully self-contained stack use Docker instead: scripts/prod/start.sh
 
 services:
   - type: web
     name: school-erp-api
-    runtime: node
+    runtime: python
     rootDir: backend
-    buildCommand: npm install && pip install -r requirements.txt
-    startCommand: npm start
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production
-      - key: PYTHON
-        value: python3
+      - key: AUTO_INIT_DB
+        value: "true"
+      - key: SEED_DEMO_DATA
+        value: "false"
       - key: SOLVER_WORKERS
         value: "8"
       - key: SOLVER_TIME_LIMIT
         value: "60"
-      - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
+      # Database switch — point at AWS RDS or Supabase
+      - key: DATABASE_URL
         sync: false
       - key: JWT_SECRET
         generateValue: true
+      - key: ADMIN_USERNAME
+        value: admin
+      - key: ADMIN_PASSWORD
+        sync: false
       - key: CORS_ORIGIN
         sync: false
 
@@ -33,9 +39,6 @@ services:
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: dist
-    # SPA routing: use frontend/public/_redirects (must not rewrite /assets/*)
     envVars:
       - key: VITE_API_URL
         sync: false
-      - key: VITE_ALLOTMENT_TIME_SEC
-        value: "120"

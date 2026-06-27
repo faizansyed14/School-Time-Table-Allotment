@@ -1,3 +1,5 @@
+import { ctRequired } from './ctPeriods.js';
+
 /** Maps class display name → curriculum subject column field */
 export const CLASS_PERIOD_FIELD = {
   '1A': 'periods_1a', '1B': 'periods_1b', '2A': 'periods_2a', '2B': 'periods_2b',
@@ -67,7 +69,9 @@ export function checkBalanceInSync({ subjects, classes, teachers, allocs }) {
       const ctPeriods = (allocs || [])
         .filter((a) => a.class_id === cls.id && a.teacher_id === cls.class_teacher_id)
         .reduce((n, a) => n + (a.periods_weekly || 0), 0);
-      if (ctPeriods > 0 && ctPeriods < 6) return false;
+      const ctTeacher = (teachers || []).find((t) => t.id === cls.class_teacher_id);
+      const required = ctRequired(cls, ctTeacher, subjects);
+      if (ctPeriods > 0 && ctPeriods < required) return false;
     }
   }
 
@@ -79,7 +83,7 @@ export function checkBalanceInSync({ subjects, classes, teachers, allocs }) {
   return (allocs || []).length > 0;
 }
 
-export function buildRemindersAfterAllocationChange({ change, teachers, classes, allocs }) {
+export function buildRemindersAfterAllocationChange({ change, teachers, classes, allocs, subjects = [] }) {
   const next = applyAllocationChange(allocs, change);
   const cls = classes.find((c) => c.id === change.class_id);
   const tch = teachers.find((t) => t.id === change.teacher_id);
@@ -135,11 +139,12 @@ export function buildRemindersAfterAllocationChange({ change, teachers, classes,
     const ctInClass = next
       .filter((a) => a.class_id === change.class_id && a.teacher_id === change.teacher_id)
       .reduce((n, a) => n + a.periods_weekly, 0);
-    if (ctInClass > 0 && ctInClass < 6) {
+    const required = ctRequired(cls, tch, subjects);
+    if (ctInClass > 0 && ctInClass < required) {
       items.push({
         page: 'Allocations',
         link: `/allocations?class=${change.class_id}`,
-        text: `**${teacherName}** is class teacher of **${className}** with **${ctInClass}**p (need **≥6** for period 1 every day). Add **${6 - ctInClass}** more in this class.`,
+        text: `**${teacherName}** is class teacher of **${className}** with **${ctInClass}**p (need **≥${required}** for period 1 every day). Add **${required - ctInClass}** more in this class.`,
       });
     }
   }

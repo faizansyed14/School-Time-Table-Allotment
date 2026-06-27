@@ -3,29 +3,38 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth.jsx';
 import {
   LayoutDashboard, Calendar, UserX, BookOpen,
-  ListChecks, Users, Sparkles, LogOut, GraduationCap, BookMarked, Loader,
+  ListChecks, Users, Sparkles, LogOut, GraduationCap, BookMarked, Loader, ShieldCheck,
 } from 'lucide-react';
 import { useAllocatorRun } from '../lib/allocatorRun.jsx';
 import AllocatorRunBanner from './AllocatorRunBanner.jsx';
 import { BalanceReminderBanner } from '../lib/balanceReminder.jsx';
 
-const NAV = [
-  { section: 'Daily', items: [
-    { to: '/dashboard',   icon: LayoutDashboard, label: 'Dashboard' },
-    { to: '/timetable',   icon: Calendar,        label: 'Timetable' },
-    { to: '/absences',    icon: UserX,            label: 'Absences' },
-  ]},
-  { section: 'Setup', items: [
-    { to: '/guide',       icon: BookMarked,  label: 'Setup Guide' },
-    { to: '/curriculum',  icon: BookOpen,    label: 'Curriculum' },
-    { to: '/allocations', icon: ListChecks,  label: 'Allocations' },
-    { to: '/teachers',    icon: Users,       label: 'Teachers' },
-    { to: '/allotment',   icon: Sparkles,    label: 'Allotment' },
-  ]},
-];
+function buildNav(role) {
+  const nav = [
+    { section: 'Daily', items: [
+      { to: '/dashboard',   icon: LayoutDashboard, label: 'Dashboard' },
+      { to: '/timetable',   icon: Calendar,        label: 'Timetable' },
+      { to: '/absences',    icon: UserX,            label: 'Absences' },
+    ]},
+    { section: 'Setup', items: [
+      { to: '/guide',       icon: BookMarked,  label: 'Setup Guide' },
+      { to: '/curriculum',  icon: BookOpen,    label: 'Curriculum' },
+      { to: '/allocations', icon: ListChecks,  label: 'Allocations' },
+      { to: '/teachers',    icon: Users,       label: 'Teachers' },
+      { to: '/allotment',   icon: Sparkles,    label: 'Allotment' },
+    ]},
+  ];
+  if (role === 'admin') {
+    nav.push({ section: 'Admin', items: [
+      { to: '/users', icon: ShieldCheck, label: 'Users' },
+    ]});
+  }
+  return nav;
+}
 
 export default function Layout() {
   const { user, logout } = useAuth();
+  const NAV = buildNav(user?.role);
   const { isRunning } = useAllocatorRun();
   const navigate = useNavigate();
   const today = new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });

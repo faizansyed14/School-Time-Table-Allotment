@@ -1,10 +1,13 @@
 -- ============================================================
--- School ERP — Database Schema
--- Run ONCE in Supabase SQL Editor before seeding.
+-- School ERP — Database Schema (PostgreSQL)
+-- Portable across Docker Postgres, AWS RDS and Supabase.
+-- Applied automatically on API startup (AUTO_INIT_DB=true),
+-- or run once manually: psql "$DATABASE_URL" -f database/schema.sql
 -- ============================================================
 
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";  -- gen_random_uuid()
+
 -- ── 1. SUBJECTS ─────────────────────────────────────────────
--- One row per subject; per-class weekly period requirements stored as columns.
 CREATE TABLE IF NOT EXISTS subjects (
   id         UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
   name       TEXT    NOT NULL UNIQUE,
@@ -52,7 +55,6 @@ CREATE TABLE IF NOT EXISTS classes (
 );
 
 -- ── 4. SUBJECT ALLOCATIONS ──────────────────────────────────
--- CP solver reads this to know who teaches what to whom, how many times/week.
 CREATE TABLE IF NOT EXISTS subject_allocations (
   teacher_id     UUID    NOT NULL REFERENCES teachers(id)  ON DELETE CASCADE,
   class_id       UUID    NOT NULL REFERENCES classes(id)   ON DELETE CASCADE,
@@ -113,16 +115,27 @@ CREATE TABLE IF NOT EXISTS allocation_reports (
   generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- ── 9. ADMIN ────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS admins (
+-- ── 9. USERS (RBAC: admin / user) ───────────────────────────
+CREATE TABLE IF NOT EXISTS users (
   id            UUID  PRIMARY KEY DEFAULT gen_random_uuid(),
   username      TEXT  NOT NULL UNIQUE,
   password_hash TEXT  NOT NULL,
+  role          TEXT  NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user')),
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- ── TRIGGERS ────────────────────────────────────────────────
+-- Migrate any legacy `admins` rows into `users` (one-time, safe to re-run).
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables
+             WHERE table_schema = 'public' AND table_name = 'admins') THEN
+    INSERT INTO users (username, password_hash, role)
+    SELECT username, password_hash, 'admin' FROM admins
+    ON CONFLICT (username) DO NOTHING;
+  END IF;
+END $$;
 
+-- ── TRIGGERS ────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION fn_teachers_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -157,10 +170,3 @@ DROP TRIGGER IF EXISTS trg_sync_allocated_periods ON timetable;
 CREATE TRIGGER trg_sync_allocated_periods
   AFTER INSERT OR UPDATE OR DELETE ON timetable
   FOR EACH ROW EXECUTE FUNCTION fn_sync_allocated_periods();
-
--- ── PERMISSIONS ─────────────────────────────────────────────
-GRANT USAGE ON SCHEMA public TO postgres, anon, authenticated, service_role;
-GRANT ALL   ON ALL TABLES    IN SCHEMA public TO postgres, service_role;
-GRANT ALL   ON ALL SEQUENCES IN SCHEMA public TO postgres, service_role;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon;

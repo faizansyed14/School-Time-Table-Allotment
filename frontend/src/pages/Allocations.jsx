@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { SUBJECT_OPTIONS } from '../lib/utils.js';
 import { buildRemindersAfterAllocationChange, checkBalanceInSync } from '../lib/balanceHints.js';
+import { ctStatus } from '../lib/ctPeriods.js';
 import { useBalanceReminder } from '../lib/balanceReminder.jsx';
 import {
   Plus, Pencil, Trash2, Search, AlertCircle, CheckCircle,
@@ -19,6 +20,7 @@ export default function Allocations() {
   const [allocs, setAllocs]       = useState([]);
   const [teachers, setTeachers]   = useState([]);
   const [classes, setClasses]     = useState([]);
+  const [subjects, setSubjects]   = useState([]);
   const [validation, setValidation] = useState(null);
   const [loading, setLoading]     = useState(true);
   const [search, setSearch]       = useState('');
@@ -41,16 +43,18 @@ export default function Allocations() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [a, t, c, v] = await Promise.all([
+      const [a, t, c, v, s] = await Promise.all([
         api.get('/allocations'),
         api.get('/teachers'),
         api.get('/timetable/classes'),
         api.get('/allocations/validate').catch(() => null),
+        api.get('/subjects').catch(() => []),
       ]);
       setAllocs(a || []);
       setTeachers(t || []);
       setClasses(c || []);
       setValidation(v);
+      setSubjects(s || []);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   }, []);
@@ -124,7 +128,7 @@ export default function Allocations() {
       if (checkBalanceInSync({ subjects, classes, teachers, allocs: freshAllocs })) {
         clearReminder();
       } else {
-        setReminder(buildRemindersAfterAllocationChange({ change, teachers, classes, allocs }));
+        setReminder(buildRemindersAfterAllocationChange({ change, teachers, classes, allocs, subjects }));
       }
     } catch (e) { setError(e.message); }
     finally { setSaving(false); }
@@ -150,7 +154,7 @@ export default function Allocations() {
       if (checkBalanceInSync({ subjects, classes, teachers, allocs: freshAllocs })) {
         clearReminder();
       } else {
-        setReminder(buildRemindersAfterAllocationChange({ change, teachers, classes, allocs }));
+        setReminder(buildRemindersAfterAllocationChange({ change, teachers, classes, allocs, subjects }));
       }
     } catch (e) { alert(e.message); }
   }
@@ -269,7 +273,7 @@ export default function Allocations() {
           <Loader size={20} className="spinner" style={{ margin: '0 auto 8px', display: 'block' }} />Loading…
         </div>
       ) : tab === 0 ? (
-        <SummaryTab classSummary={classSummary} teacherSummary={teacherSummary} teacherMap={teacherMap} onEdit={openAdd} />
+        <SummaryTab classSummary={classSummary} teacherSummary={teacherSummary} teacherMap={teacherMap} subjects={subjects} onEdit={openAdd} />
       ) : (
         <BrowseTab
           grouped={grouped} groupBy={groupBy} setGroupBy={setGroupBy}
@@ -431,7 +435,7 @@ export default function Allocations() {
 }
 
 // ── Summary Tab ───────────────────────────────────────────────
-function SummaryTab({ classSummary, teacherSummary, teacherMap, onEdit }) {
+function SummaryTab({ classSummary, teacherSummary, teacherMap, subjects = [], onEdit }) {
   const [view, setView] = useState('class');
   return (
     <div>
@@ -462,19 +466,28 @@ function SummaryTab({ classSummary, teacherSummary, teacherMap, onEdit }) {
             </thead>
             <tbody>
               {classSummary.map((c) => {
-                const ctName = c.class_teacher_id ? teacherMap[c.class_teacher_id]?.name : null;
+                const ct = c.class_teacher_id ? teacherMap[c.class_teacher_id] : null;
+                const ctName = ct?.name || null;
                 const ok     = c.total === 48;
                 const over   = c.total > 48;
-                const ctOk   = !c.class_teacher_id || c.ctAlloc >= 6;
+                const ctEval = ctStatus(c, ct, subjects, c.ctAlloc);
+                const ctOk   = ctEval.ok;
                 return (
                   <tr key={c.id}>
                     <td style={{ fontWeight: 700 }}>{c.name}</td>
                     <td>{ctName ? <span className="badge badge-gray">{ctName}</span> : <span style={{ color: 'var(--muted)' }}>Not set</span>}</td>
                     <td style={{ textAlign: 'center' }}>
-                      <span className={`badge ${ctOk ? 'badge-green' : 'badge-red'}`}>
+                      <span className={`badge ${!c.class_teacher_id ? 'badge-gray' : ctOk ? 'badge-green' : 'badge-red'}`}>
                         {c.class_teacher_id ? `${c.ctAlloc}p` : '—'}
                       </span>
-                      {!ctOk && <span style={{ fontSize: 10, color: 'var(--red)', marginLeft: 4 }}>needs ≥6</span>}
+                      {c.class_teacher_id && !ctOk && (
+                        <span style={{ fontSize: 10, color: 'var(--red)', marginLeft: 4 }}>needs ≥{ctEval.required}</span>
+                      )}
+                      {c.class_teacher_id && ctOk && ctEval.capped && (
+                        <span style={{ fontSize: 10, color: 'var(--mid)', marginLeft: 4 }} title={`This teacher can teach at most ${ctEval.max}p in this class`}>
+                          max {ctEval.max}p
+                        </span>
+                      )}
                     </td>
                     <td style={{ textAlign: 'center' }}>
                       <span className={`badge ${ok ? 'badge-green' : over ? 'badge-red' : 'badge-amber'}`}>

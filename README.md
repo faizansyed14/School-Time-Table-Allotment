@@ -41,10 +41,10 @@ Full-stack timetable management system for an Indian school.
 
 ```
 School-Time-Table-Allotment/
-├── .env.dev / .env.prod            — environment for each stack (DB switch lives here)
+├── .env.example                    — template (copy → .env.dev or .env.prod)
+├── .env.dev / .env.prod            — your secrets (git-ignored)
 ├── docker-compose.dev.yml          — dev stack (smaller resource limits)
 ├── docker-compose.prod.yml         — prod stack (full resource limits)
-├── render.yaml                     — optional Render blueprint
 │
 ├── scripts/
 │   ├── dev/  { start.sh, stop.sh } — start/stop the dev stack
@@ -80,6 +80,7 @@ School-Time-Table-Allotment/
 ### Development
 
 ```bash
+cp .env.example .env.dev      # first time only — then edit secrets
 ./scripts/dev/start.sh        # builds & starts db + api + web (.env.dev)
 # Frontend : http://localhost:3000
 # API      : http://localhost:4000/api/health
@@ -89,7 +90,8 @@ School-Time-Table-Allotment/
 ### Production
 
 ```bash
-# edit .env.prod first — replace every CHANGE_ME secret
+cp .env.example .env.prod     # first time only
+# edit .env.prod — replace every CHANGE_ME secret
 ./scripts/prod/start.sh       # builds & starts db + api + web (.env.prod)
 # Frontend : http://localhost
 ./scripts/prod/stop.sh

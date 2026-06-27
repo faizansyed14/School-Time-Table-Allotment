@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import { copyFileSync } from 'fs';
 import { join } from 'path';
 
-/** Render/static hosts: unknown paths serve 404.html (copy of index.html) */
+/** Static hosting fallback: unknown paths serve 404.html (copy of index.html) */
 function spaFallback404() {
   return {
     name: 'spa-fallback-404',

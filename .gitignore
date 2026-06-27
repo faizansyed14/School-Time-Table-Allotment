@@ -1,13 +1,12 @@
 # Dependencies
 node_modules/
 
-# Environment & secrets
+# Environment & secrets (committed template: .env.example)
 .env
 .env.local
 .env.*.local
 .env.dev
 .env.prod
-backend/.env
 
 # Build output
 dist/

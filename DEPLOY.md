@@ -1,112 +1,110 @@
-# Deploy to GitHub + Render
+# Deployment
 
-## 1. Push to GitHub
+The app ships as three containers — **db** (Postgres), **api** (FastAPI) and
+**web** (nginx) — orchestrated by Docker Compose. The database is switchable
+between the bundled Postgres, **AWS RDS** and **Supabase** via `DATABASE_URL`.
 
-From the project root (PowerShell):
+---
 
-```powershell
-git init
-git add .
-git commit -m "Initial commit: School ERP timetable app"
-git branch -M main
-git remote add origin https://github.com/YOUR_USER/YOUR_REPO.git
-git push -u origin main
+## 1. Docker (recommended)
+
+### Development
+```bash
+./scripts/dev/start.sh        # uses .env.dev — smaller resource limits
+./scripts/dev/stop.sh         # --wipe also drops the DB volume
 ```
 
-Do **not** commit `backend/.env` (it is in `.gitignore`). Keep secrets only in Render env vars.
+### Production
+```bash
+# 1. Edit .env.prod and replace every CHANGE_ME secret
+#    (JWT_SECRET, POSTGRES_PASSWORD/DATABASE_URL, ADMIN_PASSWORD, CORS_ORIGIN)
+./scripts/prod/start.sh       # uses .env.prod — full resource limits
+./scripts/prod/stop.sh
+```
+
+| Service | Dev port | Prod port |
+|---|---|---|
+| web (frontend) | 3000 | 80 |
+| api (FastAPI)  | 4000 | 4000 |
+| db (Postgres)  | 5432 | internal |
+
+Dev and prod stacks are structurally identical; only the resource limits
+(`deploy.resources.limits` in the compose files) and secrets differ.
 
 ---
 
-## 2. Supabase (if not done)
+## 2. Using AWS RDS or Supabase instead of the bundled Postgres
 
-In Supabase SQL Editor, run in order:
+Edit `DATABASE_URL` in the relevant `.env` file:
 
-1. `database/schema.sql`
-2. `database/seeds/01_admin.sql` … `05_allocations.sql`
-3. Optional: `database/patches/02_fix_admin_password.sql` if login fails
+```bash
+# AWS RDS
+DATABASE_URL=postgresql://USER:PASS@xxxx.rds.amazonaws.com:5432/school_erp?sslmode=require
+# Supabase
+DATABASE_URL=postgresql://postgres:PASS@db.YOURREF.supabase.co:5432/postgres
+```
 
-Copy **Project URL** and **service_role** key (Settings → API).
-
----
-
-## 3. Render — backend (Web Service)
-
-| Setting | Value |
-|--------|--------|
-| **Root Directory** | `backend` |
-| **Runtime** | Node |
-| **Build Command** | `npm install` |
-| **Start Command** | `npm start` |
-| **Health Check Path** | `/api/health` |
-
-**Environment variables:**
-
-| Key | Value |
-|-----|--------|
-| `SUPABASE_URL` | `https://xxxx.supabase.co` |
-| `SUPABASE_SERVICE_ROLE_KEY` | your service role key |
-| `JWT_SECRET` | long random string |
-| `NODE_ENV` | `production` |
-| `CORS_ORIGIN` | `https://school-erp-web-2xc0.onrender.com` (your static site URL) |
-
-After deploy, note the URL, e.g. `https://school-erp-api.onrender.com`.
-
-**Timetable Engine:** The engine now runs natively in Node.js (JavaScript). No Python or external dependencies are required. Timetable generation is synchronous and typically completes in a few seconds.
+The `db` service can then be left running (unused) or removed from the compose
+file. On first boot the API applies `database/schema.sql` and seeds the admin
+user automatically (`AUTO_INIT_DB=true`).
 
 ---
 
-## 4. Render — frontend (Static Site)
+## 3. Render (optional, managed)
 
-| Setting | Value |
-|--------|--------|
-| **Root Directory** | `frontend` |
-| **Build Command** | `npm install && npm run build` |
-| **Publish Directory** | `dist` |
-
-**SPA routing / refresh:** App uses **hash URLs** (`/#/dashboard`, `/#/allotment`). Refresh keeps the same page. Build copies `index.html` → `404.html` for Render.
-
-**Remove** any manual Render redirect `/*` → `/index.html` (it breaks `/assets/*.js`).
-
-Redeploy frontend; use links like `https://YOUR-FRONTEND.onrender.com/#/allotment`.
-
-**Environment variable (required):**
-
-| Key | Value |
-|-----|--------|
-| `VITE_API_URL` | `https://school-erp-api.onrender.com` (your backend URL, **no** trailing slash) |
-
-Redeploy frontend after changing `VITE_API_URL` (required at **build** time — changing env alone without redeploy does nothing).
-
-**Quick fallback:** edit `frontend/public/config.js` and set `window.__ERP_API_URL__ = 'https://your-api.onrender.com'`, then redeploy.
+`render.yaml` deploys the FastAPI API (Python runtime) + the static frontend.
+Provide a managed database via the `DATABASE_URL` env var (AWS RDS / Supabase),
+set `ADMIN_PASSWORD`, `CORS_ORIGIN`, and `VITE_API_URL` (the API URL, no trailing
+slash) on the static site.
 
 ---
 
-## 5. Optional: Blueprint
+## 4. Environment variables
 
-Repo includes `render.yaml`. In Render: **New → Blueprint** → connect repo → set the same secrets when prompted → set `VITE_API_URL` to the API service URL after the API is live.
+| Key | Purpose |
+|---|---|
+| `DATABASE_URL` | **The DB switch** (docker / RDS / Supabase) |
+| `JWT_SECRET` | Token signing secret |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Seeded admin login |
+| `CORS_ORIGIN` | Comma-separated allowed frontend origins |
+| `AUTO_INIT_DB` | Apply schema + seed admin on startup |
+| `SEED_DEMO_DATA` | Load demo subjects/teachers/classes when DB empty |
+| `RATE_LIMIT_LOGIN` / `RATE_LIMIT_CAPTCHA` | e.g. `5/minute` |
+| `CAPTCHA_LENGTH` / `CAPTCHA_TTL_SECONDS` | Captcha config |
+| `SOLVER_TIME_LIMIT` / `SOLVER_WORKERS` | CP-SAT tuning |
+| `SAME_PERIOD_CONSISTENCY` | Keep same teacher/subject in the same period daily (`true`/`false`) |
+| `VITE_API_URL` | Frontend → API base (build-time) |
+
+## Data safety / does it re-seed?
+
+Startup is **non-destructive and idempotent**:
+
+- `schema.sql` is `CREATE ... IF NOT EXISTS` / `CREATE OR REPLACE` only — it never
+  drops or truncates tables.
+- The admin user is inserted only if that username doesn't already exist.
+- Demo data loads **only when `SEED_DEMO_DATA=true` AND the database is completely
+  empty** (no subjects/teachers/classes). `.env.prod` sets `SEED_DEMO_DATA=false`.
+
+So restarting the containers does **not** re-seed or overwrite live data. The
+Docker volume persists data across restarts; only `stop.sh --wipe` (`down -v`)
+deletes it. Starting in `NODE_ENV=production` with default/weak secrets fails fast
+via a built-in safety check.
 
 ---
 
-## 6. Verify
+## 5. Verify
 
-1. `https://YOUR-API.onrender.com/api/health` → `{"status":"ok"}`
-2. Open static site → login `admin` / `admin123`
-3. Dashboard and timetable load without network errors in browser DevTools
-
----
-
-## Local vs production
-
-| | Local | Render |
-|--|--------|--------|
-| API | `http://localhost:4000` | Backend service URL |
-| Frontend | Vite proxy `/api` → 4000 | `VITE_API_URL` + `/api/...` |
-| DB | Supabase (same project) | Same Supabase project |
+1. `http://localhost:4000/api/health` → `{"status":"ok","adminReady":true}`
+2. Open the frontend → sign in as `admin` / `admin` (or your configured admin).
+   Enter the captcha shown after the password field.
+3. As admin, open **Users** to create additional users with roles.
 
 ---
 
 ## Troubleshooting
 
-- **CORS / failed fetch:** `VITE_API_URL` must match backend URL exactly (https, no trailing `/`).
-- **Allotment issues:** Ensure all constraints (Starts From, Class Teacher, etc.) are physically possible given the teacher's total allotted periods.
-- **Login fails:** Run `database/patches/02_fix_admin_password.sql` in Supabase.
+- **Login captcha fails:** captcha is single-use and expires after
+  `CAPTCHA_TTL_SECONDS`; click refresh to get a new one.
+- **CORS / failed fetch:** `VITE_API_URL` must match the API URL, and the API's
+  `CORS_ORIGIN` must include the frontend origin.
+- **DB connection errors:** verify `DATABASE_URL` (and `sslmode=require` for RDS/Supabase).

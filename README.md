@@ -1,6 +1,7 @@
 # School ERP — AY 2026-27
 
-Full-stack timetable management system for an Indian school. 15 classes · 21 teachers · CP-SAT auto-allocation.
+Full-stack timetable management system for an Indian school.
+15 classes · 21 teachers · CP-SAT auto-allocation.
 
 ---
 
@@ -8,147 +9,183 @@ Full-stack timetable management system for an Indian school. 15 classes · 21 te
 
 | Layer | Tech |
 |---|---|
-| Database | Supabase (PostgreSQL) |
-| Backend | Node.js · Express · JWT |
-| Solver | Python · OR-Tools CP-SAT |
+| Database | PostgreSQL (Docker / **AWS RDS** / **Supabase** — switchable via `DATABASE_URL`) |
+| Backend | **Python · FastAPI · Uvicorn** · JWT · RBAC |
+| Solver | Python · OR-Tools CP-SAT (in-process) |
 | Frontend | React · Vite · React Router |
+| Runtime | Docker + Docker Compose (dev & prod) |
+
+### What's included
+
+- 🔐 **Two-step auth + Captcha** — step 1 verifies the username/password; only on
+  success is an image captcha (random A–Z PNG) shown; step 2 verifies the captcha
+  and signs in. The captcha never appears for a wrong password. The password step
+  returns a short-lived signed challenge so the password isn't resent.
+- 🎨 **Professional UI** — Inter/Lexend typography, an indigo school theme, reusable
+  popups, and a blocking loading overlay during allotment. The allocation summary
+  opens in a modal (not inline in the pre-check). Class-teacher period targets
+  respect what's *attainable* (e.g. a CT who can only teach 5 periods in their class
+  isn't wrongly flagged as needing 6).
+- 👮 **RBAC** — `admin` and `user` roles. Admins get a **Users** screen to create users
+  (username / password / role) and full CRUD.
+- 🌱 **Seeded admin** — created automatically on startup from `ADMIN_USERNAME` /
+  `ADMIN_PASSWORD` (defaults `admin` / `admin`, configurable in `.env`).
+- 🚦 **Rate limiting** — on the login and captcha endpoints (configurable).
+- 🐘 **PostgreSQL** — switch between Docker, AWS RDS and Supabase by changing one
+  variable (`DATABASE_URL`).
+- 🐳 **Docker** — identical dev and prod stacks (prod with more resources).
 
 ---
 
-## Project Structure
+## Project structure
 
 ```
-school-erp/
+School-Time-Table-Allotment/
+├── .env.dev / .env.prod            — environment for each stack (DB switch lives here)
+├── docker-compose.dev.yml          — dev stack (smaller resource limits)
+├── docker-compose.prod.yml         — prod stack (full resource limits)
+├── render.yaml                     — optional Render blueprint
+│
+├── scripts/
+│   ├── dev/  { start.sh, stop.sh } — start/stop the dev stack
+│   └── prod/ { start.sh, stop.sh } — start/stop the prod stack
+│
 ├── database/
-│   ├── schema.sql              — All tables, triggers, permissions
-│   ├── README.md               — Run order & verification queries
-│   └── seeds/
-│       ├── 01_admin.sql        — Login: admin / admin123
-│       ├── 02_subjects.sql     — 14 subjects × 15 class requirements
-│       ├── 03_teachers.sql     — 21 teachers with workload targets
-│       ├── 04_classes.sql      — 15 classes + class teacher assignments
-│       └── 05_allocations.sql  — 143 rows = 720 periods total
+│   ├── schema.sql                  — tables, triggers, RBAC `users` table
+│   └── seeds/                      — subjects / teachers / classes / allocations
 │
-├── backend/
-│   ├── .env.example
-│   ├── package.json
-│   ├── src/
-│   │   ├── index.js            — Express entry point
-│   │   ├── config/
-│   │   │   └── supabase.js
-│   │   ├── middleware/
-│   │   │   └── auth.js         — JWT bearer guard
-│   │   └── routes/
-│   │       ├── auth.js         — POST /api/auth/login
-│   │       ├── dashboard.js    — GET  /api/dashboard/stats
-│   │       ├── teachers.js     — CRUD /api/teachers
-│   │       ├── classes.js      — CRUD /api/classes
-│   │       ├── subjects.js     — CRUD /api/subjects
-│   │       ├── timetable.js    — GET/PUT /api/timetable
-│   │       ├── absences.js     — Absences + substitutes
-│   │       ├── allocations.js  — CRUD + validate + auto-generate
-│   │       └── allocate.js     — Run CP-SAT + apply to timetable
-│   └── scripts/
-│       ├── allocator.py        — CP-SAT timetable solver
-│       └── autoGenerate.py     — Subject allocation generator
+├── backend/                        — FastAPI app (layered for production)
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   └── app/
+│       ├── main.py                 — app wiring, CORS, routers, health
+│       ├── core/                   — config, security (JWT/bcrypt/RBAC), rate limiting
+│       ├── db/                     — database pool + query helpers, startup bootstrap
+│       ├── services/               — solver, solver_bridge, captcha,
+│       │                             allocation validation, serialization
+│       ├── schemas/                — pydantic request/response models
+│       └── api/routers/            — auth, users, dashboard, teachers, classes,
+│                                     subjects, timetable, absences,
+│                                     allocations, allocate
 │
-└── frontend/
-    ├── package.json
-    ├── vite.config.js          — Port 3000, proxy /api → 4000
-    ├── index.html
-    └── src/
-        ├── App.jsx
-        ├── main.jsx
-        ├── styles.css
-        ├── lib/
-        │   ├── api.js          — Fetch wrapper with JWT
-        │   ├── auth.jsx        — AuthContext + useAuth hook
-        │   └── utils.js        — DAYS, PERIODS, helpers
-        ├── components/
-        │   └── Layout.jsx      — Sidebar + topbar
-        └── pages/
-            ├── Login.jsx
-            ├── Dashboard.jsx
-            ├── Timetable.jsx   — Class / Teacher / Master views
-            ├── Absences.jsx    — Mark absent + assign substitutes
-            ├── Curriculum.jsx  — Subjects matrix + Class teachers
-            ├── Allocations.jsx — Subject allocations CRUD + auto-generate
-            ├── Teachers.jsx    — Teacher profiles
-            └── Allotment.jsx   — Run CP solver + apply
+└── frontend/                       — React + Vite SPA (nginx in Docker)
+    ├── Dockerfile / nginx.conf
+    └── src/ … (adds captcha login step + admin Users page)
 ```
 
 ---
 
-## Setup
+## Quick start (Docker)
 
-### 1 — Database (Supabase)
-
-Run in this order in Supabase SQL Editor:
-
-```
-database/schema.sql
-database/seeds/01_admin.sql
-database/seeds/02_subjects.sql
-database/seeds/03_teachers.sql
-database/seeds/04_classes.sql
-database/seeds/05_allocations.sql
-```
-
-### 2 — Backend
+### Development
 
 ```bash
+./scripts/dev/start.sh        # builds & starts db + api + web (.env.dev)
+# Frontend : http://localhost:3000
+# API      : http://localhost:4000/api/health
+./scripts/dev/stop.sh         # stop  (add --wipe to drop the DB volume)
+```
+
+### Production
+
+```bash
+# edit .env.prod first — replace every CHANGE_ME secret
+./scripts/prod/start.sh       # builds & starts db + api + web (.env.prod)
+# Frontend : http://localhost
+./scripts/prod/stop.sh
+```
+
+Login with the seeded admin (`ADMIN_USERNAME` / `ADMIN_PASSWORD`, default `admin` / `admin`).
+On the password field blur, a captcha appears — type the letters to sign in.
+
+---
+
+## Switching the database (Supabase ⇄ AWS RDS)
+
+Edit **only** `DATABASE_URL` in `.env.dev` / `.env.prod`:
+
+```bash
+# Bundled Docker Postgres (default)
+DATABASE_URL=postgresql://erp:erp_password@db:5432/school_erp
+# AWS RDS
+DATABASE_URL=postgresql://USER:PASS@xxxx.rds.amazonaws.com:5432/school_erp?sslmode=require
+# Supabase
+DATABASE_URL=postgresql://postgres:PASS@db.YOURREF.supabase.co:5432/postgres
+```
+
+With `AUTO_INIT_DB=true` the API applies the schema and seeds the admin user on
+startup against whichever database `DATABASE_URL` points to.
+
+---
+
+## Local dev without Docker (optional)
+
+```bash
+# Backend
 cd backend
-npm install
-cp .env.example .env     # fill in SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, JWT_SECRET
-pip install ortools      # Python dependency for the solver
-npm run dev              # starts on port 4000
+python -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+export DATABASE_URL=postgresql://erp:erp_password@localhost:5432/school_erp
+export JWT_SECRET=dev-secret ADMIN_USERNAME=admin ADMIN_PASSWORD=admin
+uvicorn app.main:app --reload --port 4000
+
+# Frontend
+cd frontend && npm install && npm run dev      # http://localhost:3000
 ```
-
-### 3 — Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev              # starts on port 3000
-```
-
-Login at http://localhost:3000 with `admin` / `admin123`
-
-### Deploy (GitHub + Render)
-
-See **[DEPLOY.md](./DEPLOY.md)** for push steps, Render web + static site setup, and env vars (`VITE_API_URL`, Supabase, JWT).
 
 ---
 
-## Feature Overview
+## Feature overview
 
 | Page | What you do |
 |---|---|
-| Dashboard | Overview — absent teachers today, quick actions |
-| Timetable | View class/teacher/master timetable grid |
+| Dashboard | Overview — absent teachers today, quick stats |
+| Timetable | View class/teacher/master timetable grid; master-cell editing |
 | Absences | Mark teachers absent, assign period-by-period substitutes |
 | Curriculum | Edit subject period requirements; assign class teachers |
-| Allocations | Define who teaches what where; validate; auto-generate |
+| Allocations | Define who teaches what where; validate; auto-generate (CP-SAT) |
 | Teachers | Manage teacher profiles, subjects, workload targets |
-| Allotment | Toggle R1/R2 rules, run CP-SAT solver, apply to timetable |
+| Allotment | **One-click Auto Allotment** (generate + schedule + apply), or schedule saved allocations |
+| **Users** *(admin)* | Create users (username/password/role) + full CRUD |
+
+### One-click Auto Allotment
+
+The Allotment page has a single **Auto Allotment** button that runs the whole
+pipeline — generate allocations (Phase A) → schedule into the grid (Phase B) →
+apply to the timetable — in one step. If a freshly generated allocation can't be
+scheduled under the hard rules, it automatically falls back to scheduling your
+existing saved allocations, so one click reliably produces a timetable. The
+two-step flow (edit on **Allocations**, then **Schedule Saved Allocations**)
+remains for when you want to preserve manually tuned allocations.
+
+### Same teacher/subject in the same period every day (best-effort)
+
+The scheduler keeps the same teacher + subject in the same daily period as much
+as possible, so teachers follow a stable routine (toggle with
+`SAME_PERIOD_CONSISTENCY`). A *strict* fixed column isn't always possible — a
+subject whose weekly total isn't a multiple of 6 (e.g. English = 9) can't fill
+one period across all 6 days — so this is a strong soft preference applied on top
+of the hard rules R1–R5, not a rule that could make the timetable infeasible.
 
 ---
 
-## Timetable Rules
+## Timetable rules (CP-SAT)
 
-| Rule | Description | Configurable |
-|---|---|---|
-| R1 | Class teacher teaches Period 1 every day | Toggle on/off |
-| R2 | Diary is Period 8 for Classes 1–2 | Toggle on/off |
-| R5 | Max 2 periods of the same subject per day | Always on |
-| R6 | Games never in Period 8 | Always on |
-| min_period_start | Teacher cannot be scheduled before this period | Per teacher |
+| Rule | Description |
+|---|---|
+| R1 | Class teacher teaches Period 1 in their own class |
+| R2 | Diary is the last period for Classes 1–2 |
+| R3 | A teacher is never double-booked |
+| R4 | Teacher `min_period_start` respected |
+| R5 | Max 2 periods of the same subject per day |
 
 ---
 
-## Key Data
+## Key data
 
 - 21 teachers · 15 classes · 720 periods/week (15 × 48)
-- Classes 1A, 1B, 2A, 2B, 3A, 3B, 4A, 4B, 5, 6A, 6B, 7, 8, 9, 10
+- Classes: 1A, 1B, 2A, 2B, 3A, 3B, 4A, 4B, 5, 6A, 6B, 7, 8, 9, 10
 - 6 days/week · 8 periods/day
-- Solver: OR-Tools CP-SAT (max 90s time limit, configurable)
+- Solver: OR-Tools CP-SAT (time limit & workers configurable via env)
+
+See **[DEPLOY.md](./DEPLOY.md)** for cloud deployment notes.

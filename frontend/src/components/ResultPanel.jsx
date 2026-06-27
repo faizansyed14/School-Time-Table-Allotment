@@ -1,8 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  AlertCircle, CheckCircle, ChevronDown, ChevronUp, Loader, Clock,
+  AlertCircle, CheckCircle, BarChart2, Loader, Clock,
 } from 'lucide-react';
+import Modal from './Modal.jsx';
+import { ctStatus } from '../lib/ctPeriods.js';
 
 const PERIODS_PER_CLASS = 48;
 const ISSUE_PREVIEW = 6;
@@ -15,7 +17,7 @@ function normalizeResult(result) {
   return { ...result, success, filled, total };
 }
 
-function buildClassRows(result, classes, teachers) {
+function buildClassRows(result, classes, teachers, subjects) {
   if (!result?.success || !classes?.length) return [];
   const teacherById = Object.fromEntries((teachers || []).map((t) => [t.id, t]));
   const summary = result.class_summary || {};
@@ -26,9 +28,11 @@ function buildClassRows(result, classes, teachers) {
       const s = summary[c.id] || {};
       const periods = s.periods_filled ?? 0;
       const ctPeriods = s.ct_periods ?? 0;
-      const ctName = c.class_teacher_id ? teacherById[c.class_teacher_id]?.name || '—' : '—';
-      const ok = periods === PERIODS_PER_CLASS && (!c.class_teacher_id || ctPeriods >= 6);
-      return { id: c.id, name: c.name, periods, ctName, ctPeriods, ok };
+      const ct = c.class_teacher_id ? teacherById[c.class_teacher_id] : null;
+      const ctName = ct?.name || '—';
+      const ctEval = ctStatus(c, ct, subjects, ctPeriods);
+      const ok = periods === PERIODS_PER_CLASS && (!c.class_teacher_id || ctEval.ok);
+      return { id: c.id, name: c.name, periods, ctName, ctPeriods, ok, ctCapped: ctEval.capped, ctMax: ctEval.max };
     });
 }
 
@@ -117,46 +121,49 @@ function AllocationSummaryTable({ rows, mode }) {
     <div style={{ marginTop: 16 }}>
       <button
         type="button"
-        className="btn btn-ghost btn-sm"
-        onClick={() => setOpen((v) => !v)}
-        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: open ? 10 : 0 }}
+        className="btn btn-outline btn-sm"
+        onClick={() => setOpen(true)}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
       >
-        {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-        View allocation summary
+        <BarChart2 size={14} /> View allocation summary
       </button>
-      {open && (
+
+      <Modal open={open} onClose={() => setOpen(false)} title="Allocation summary" size="lg">
         <div className="table-wrap">
-          <table style={{ fontSize: 13 }}>
+          <table>
             <thead>
               <tr>
                 <th>Class</th>
                 <th style={{ textAlign: 'right' }}>Periods</th>
                 <th>Class teacher</th>
                 <th style={{ textAlign: 'right' }}>CT periods</th>
-                <th style={{ textAlign: 'center' }} />
+                <th style={{ textAlign: 'center' }}>OK</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r, i) => (
-                <tr key={r.id} style={{ background: i % 2 ? 'var(--bg)' : undefined }}>
-                  <td style={{ fontWeight: 600 }}>{r.name}</td>
+              {rows.map((r) => (
+                <tr key={r.id}>
+                  <td style={{ fontWeight: 700 }}>{r.name}</td>
                   <td style={{ textAlign: 'right' }}>{r.periods}/{PERIODS_PER_CLASS}</td>
                   <td>{r.ctName}</td>
-                  <td style={{ textAlign: 'right' }}>{r.ctPeriods}</td>
+                  <td style={{ textAlign: 'right' }}>
+                    {r.ctPeriods}
+                    {r.ctCapped && <span style={{ fontSize: 10, color: 'var(--mid)', marginLeft: 4 }}>max {r.ctMax}</span>}
+                  </td>
                   <td style={{ textAlign: 'center' }}>
-                    {r.ok ? <CheckCircle size={14} style={{ color: 'var(--green)' }} /> : '—'}
+                    {r.ok ? <CheckCircle size={15} style={{ color: 'var(--green)' }} /> : <AlertCircle size={15} style={{ color: 'var(--amber)' }} />}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {mode === 'full' && (
-            <p style={{ fontSize: 11, color: 'var(--mid)', marginTop: 8 }}>
-              Full mode: periods filled from timetable grid when available.
-            </p>
-          )}
         </div>
-      )}
+        {mode === 'full' && (
+          <p style={{ fontSize: 11, color: 'var(--mid)', marginTop: 10 }}>
+            Full mode: periods filled from timetable grid when available.
+          </p>
+        )}
+      </Modal>
     </div>
   );
 }
@@ -234,6 +241,7 @@ export default function ResultPanel({
   precheckIssues = [],
   classes = [],
   teachers = [],
+  subjects = [],
   genAt = null,
   children = null,
 }) {
@@ -261,8 +269,8 @@ export default function ResultPanel({
   }, [normalized, precheckIssues]);
 
   const classRows = useMemo(
-    () => buildClassRows(normalized, classes, teachers),
-    [normalized, classes, teachers],
+    () => buildClassRows(normalized, classes, teachers, subjects),
+    [normalized, classes, teachers, subjects],
   );
 
   if (loading) {

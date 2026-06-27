@@ -133,7 +133,10 @@ export function AllocatorRunProvider({ children }) {
     setShowCancelConfirm(false);
 
     try {
-      const res = await fetch(apiUrl('/allocate/run'), {
+      // endpoint: '/allocate/run' (schedule saved allocations) or
+      //           '/allocate/auto' (one-click generate + schedule + apply)
+      const endpoint = opts.endpoint || '/allocate/run';
+      const res = await fetch(apiUrl(endpoint), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

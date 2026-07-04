@@ -1,5 +1,5 @@
 # ============================================================
-# School ERP — DEVELOPMENT stack
+# school TT allotment — DEVELOPMENT stack
 # Run via: scripts/dev/start.sh   (uses .env.dev)
 # Structurally identical to production, with smaller resource limits.
 # ============================================================

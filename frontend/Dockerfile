@@ -1,4 +1,4 @@
-# School ERP — frontend (Vite build served by nginx)
+# school TT allotment — frontend (Vite build served by nginx)
 FROM node:20-alpine AS build
 WORKDIR /app
 

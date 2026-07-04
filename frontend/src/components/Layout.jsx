@@ -45,7 +45,7 @@ export default function Layout() {
         <div className="sidebar-logo">
           <div className="logo-mark">
             <GraduationCap size={16} color="var(--dark)" />
-            <h1>School ERP</h1>
+            <h1>School TT Allotment</h1>
           </div>
           <p>Admin Portal</p>
         </div>
@@ -86,7 +86,7 @@ export default function Layout() {
         <header className="topbar">
           <div className="topbar-left">
             <GraduationCap size={15} />
-            <span style={{ fontWeight: 600 }}>School ERP</span>
+            <span style={{ fontWeight: 600 }}>school TT allotment</span>
           </div>
           <div className="topbar-right">
             <span style={{ fontSize: 12, color: 'var(--mid)' }}>{today}</span>

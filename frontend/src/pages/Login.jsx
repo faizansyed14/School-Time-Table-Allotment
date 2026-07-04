@@ -104,7 +104,7 @@ export default function Login() {
             <GraduationCap size={20} color="#fff" />
           </div>
           <div>
-            <h1>School ERP</h1>
+            <h1>School TT Allotment</h1>
             <p>{step === STEP_PASSWORD ? 'Sign in to your account' : 'Security check'}</p>
           </div>
         </div>

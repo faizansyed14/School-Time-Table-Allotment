@@ -1,4 +1,4 @@
-# School ERP — Python (FastAPI) API
+# school TT allotment — Python (FastAPI) API
 # Build context is the REPO ROOT (so the database/ folder is available for
 # the startup schema bootstrap).  See docker-compose.*.yml.
 FROM python:3.11-slim

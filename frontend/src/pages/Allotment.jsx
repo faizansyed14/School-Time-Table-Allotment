@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
-import { Check, Loader, RefreshCw, BarChart2, Zap, Sparkles } from 'lucide-react';
+import {
+  Check, Loader, RefreshCw, BarChart2, Zap, Sparkles,
+  CheckCircle, AlertCircle, Calendar, Trash2, ListChecks,
+} from 'lucide-react';
 import AllotmentSummaryPanel from '../components/AllotmentSummaryPanel.jsx';
 import ResultPanel from '../components/ResultPanel.jsx';
 import Modal from '../components/Modal.jsx';
@@ -19,7 +22,7 @@ export default function Allotment() {
   const [subjects, setSubjects] = useState([]);
   const [showSummary, setShowSummary] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
-  const [runMode, setRunMode] = useState('auto'); // for the loading overlay text
+  const [runMode, setRunMode] = useState('auto');
   const navigate = useNavigate();
 
   const loadSummary = useCallback(async () => {
@@ -57,6 +60,7 @@ export default function Allotment() {
   useEffect(() => { loadState(); }, [loadState]);
 
   async function clearLastResult() {
+    if (!window.confirm('Clear the last run preview?')) return;
     try {
       await api.delete('/allocate/result');
       setLastRun(null);
@@ -84,7 +88,6 @@ export default function Allotment() {
   }
 
   async function autoAllot() {
-    // One-click: generate allocations + schedule + apply to timetable.
     setRunMode('auto');
     setRunning(true);
     setLastRun(null);
@@ -105,7 +108,7 @@ export default function Allotment() {
     try {
       const r = await api.post('/allocate/apply');
       await loadState();
-      alert(`Timetable applied: ${r.slots_inserted} slots inserted.`);
+      setLastRun((prev) => (prev ? { ...prev, applied: true, slots_inserted: r.slots_inserted } : prev));
       navigate('/timetable');
     } catch (e) { alert(e.message); }
     finally { setApplying(false); }
@@ -118,30 +121,25 @@ export default function Allotment() {
 
   const precheckIssues = validation?.issues || [];
   const precheckErrors = precheckIssues.filter((i) => i.severity === 'error');
-  const canRun = precheckErrors.length === 0 && !running;
+  const precheckWarnings = precheckIssues.filter((i) => i.severity === 'warning');
+  const canSchedule = precheckErrors.length === 0 && !running;
+  const canAuto = precheckErrors.length === 0 && !running;
+
+  const lastSuccess = lastRun?.success;
+  const alreadyApplied = lastRun?.applied;
 
   return (
-    <div>
+    <div className="allotment-page">
       <div className="page-header">
         <div>
           <h2>Allotment</h2>
-          <p>One-click Auto Allotment, or schedule the allocations you edited on the Allocations page. Same teacher/subject is kept in the same period every day where the rules allow.</p>
-        </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          {lastRun && (
-            <button type="button" className="btn btn-outline" onClick={clearLastResult} style={{ color: 'var(--red)' }}>
-              <RefreshCw size={14} /> Clear Result
-            </button>
-          )}
-          <button type="button" className="btn btn-outline" onClick={openSummary}>
-            <BarChart2 size={14} /> View summary
-          </button>
+          <p>Build the weekly timetable from your data — one click or step-by-step.</p>
         </div>
       </div>
 
       <LoadingOverlay
         open={running}
-        title={runMode === 'auto' ? 'Generating allotment…' : 'Scheduling timetable…'}
+        title={runMode === 'auto' ? 'Running auto allotment…' : 'Scheduling timetable…'}
         message="The solver is placing periods under all rules. This can take up to a minute."
       />
 
@@ -152,10 +150,10 @@ export default function Allotment() {
         size="xl"
         footer={(
           <>
-            <button className="btn btn-outline btn-sm" onClick={() => loadSummary()} disabled={summaryLoading}>
-              <RefreshCw size={13} /> Refresh
+            <button type="button" className="btn btn-outline btn-sm" onClick={() => loadSummary()} disabled={summaryLoading}>
+              <RefreshCw size={13} className={summaryLoading ? 'spinner' : ''} /> Refresh
             </button>
-            <button className="btn btn-primary btn-sm" onClick={() => setShowSummary(false)}>Close</button>
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => setShowSummary(false)}>Close</button>
           </>
         )}
       >
@@ -166,90 +164,176 @@ export default function Allotment() {
         />
       </Modal>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-        <div className="card">
-          <div className="card-header">
-            <span style={{ fontWeight: 600, fontSize: 14 }}>Data pre-check</span>
-            <button className="btn btn-ghost btn-sm" onClick={loadState}><RefreshCw size={12} /></button>
-          </div>
-          <div className="card-body" style={{ paddingTop: 8 }}>
-            {!validation ? (
-              <p style={{ fontSize: 13, color: 'var(--mid)' }}>Checking…</p>
-            ) : (
-              <ResultPanel precheckIssues={precheckIssues} mode="schedule" />
-            )}
-          </div>
-        </div>
-
-        <div className="card">
-          <div className="card-header"><span style={{ fontWeight: 600, fontSize: 14 }}>Timetable Rules (Always Active)</span></div>
-          <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <RuleInfo label="R1 — Class Teacher at Period 1" hint="Class teacher teaches P1 in their class, every day." />
-            <RuleInfo label="R2 — Diary at Period 8 (Classes 1–2)" hint="Last period = Diary for Classes 1A, 1B, 2A, 2B." />
-            <RuleInfo label="R3 — No Teacher Conflicts" hint="One teacher, one class per slot." />
-            <RuleInfo label="R4 — Teacher Period Restriction" hint="Respects each teacher's 'Starts from' setting." />
-          </div>
-        </div>
+      {/* Status strip */}
+      <div className="allotment-status-bar">
+        {!validation ? (
+          <span className="allotment-status-pill neutral"><Loader size={12} className="spinner" /> Checking data…</span>
+        ) : precheckErrors.length > 0 ? (
+          <span className="allotment-status-pill err">
+            <AlertCircle size={13} /> {precheckErrors.length} blocking issue{precheckErrors.length !== 1 ? 's' : ''}
+          </span>
+        ) : (
+          <span className="allotment-status-pill ok">
+            <CheckCircle size={13} /> Data ready
+          </span>
+        )}
+        {precheckWarnings.length > 0 && (
+          <span className="allotment-status-pill warn">
+            <AlertCircle size={13} /> {precheckWarnings.length} warning{precheckWarnings.length !== 1 ? 's' : ''}
+          </span>
+        )}
+        {lastSuccess && (
+          <span className="allotment-status-pill ok">
+            <CheckCircle size={13} />
+            Last run: {lastRun.filled}/{lastRun.total} placed
+            {alreadyApplied ? ' · applied' : ' · preview'}
+          </span>
+        )}
       </div>
 
-      <div className="card">
-        <div className="card-header"><span style={{ fontWeight: 600, fontSize: 14 }}>Schedule Timetable</span></div>
-        <div className="card-body">
+      <div className="allotment-layout">
+        {/* Main column */}
+        <div className="allotment-main">
+          {/* Action cards */}
+          <div className="allotment-actions">
+            <div className="allotment-action-card recommended">
+              <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                <div className="action-icon"><Sparkles size={18} /></div>
+                <div>
+                  <h3>Auto Allotment</h3>
+                  <p>
+                    Generates allocations, schedules the grid, and saves the timetable — all in one step.
+                    Best for a fresh start.
+                  </p>
+                </div>
+              </div>
+              <button type="button" className="btn btn-primary" onClick={autoAllot} disabled={!canAuto || running}>
+                {running && runMode === 'auto'
+                  ? <><Loader size={13} className="spinner" /> Working…</>
+                  : <><Sparkles size={13} /> Run Auto Allotment</>}
+              </button>
+            </div>
+
+            <div className="allotment-action-card manual">
+              <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                <div className="action-icon"><Zap size={18} /></div>
+                <div>
+                  <h3>Schedule saved plan</h3>
+                  <p>
+                    Uses allocations from the{' '}
+                    <Link to="/allocations" style={{ color: 'var(--primary)', fontWeight: 600 }}>Allocations</Link>
+                    {' '}page. Preview first, then apply when ready.
+                  </p>
+                </div>
+              </div>
+              <button type="button" className="btn btn-outline" onClick={runSolver} disabled={!canSchedule || running}>
+                {running && runMode === 'schedule'
+                  ? <><Loader size={13} className="spinner" /> Scheduling…</>
+                  : <><Zap size={13} /> Schedule &amp; preview</>}
+              </button>
+            </div>
+          </div>
+
           {precheckErrors.length > 0 && (
-            <p style={{ fontSize: 13, color: 'var(--red)', marginBottom: 12 }}>
-              Fix {precheckErrors.length} issue{precheckErrors.length !== 1 ? 's' : ''} above (curriculum, coverage, or saved allocations) before scheduling.
-            </p>
+            <div className="alert alert-red" style={{ margin: 0 }}>
+              <AlertCircle size={14} />
+              Fix blocking issues in the sidebar before running.
+            </div>
           )}
 
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-            <button className="btn btn-primary" onClick={autoAllot} disabled={running} style={{ minWidth: 220 }}>
-              {running
-                ? <><Loader size={13} className="spinner" /> Working…</>
-                : <><Sparkles size={13} /> Auto Allotment (one-click)</>}
-            </button>
-            <button className="btn btn-outline" onClick={runSolver} disabled={!canRun || running} style={{ minWidth: 200 }}>
-              {running
-                ? <><Loader size={13} className="spinner" /> Scheduling…</>
-                : <><Zap size={13} /> Schedule Saved Allocations</>}
-            </button>
+          {/* Results */}
+          <div className="card">
+            <div className="card-header">
+              <span style={{ fontWeight: 600, fontSize: 14, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <ListChecks size={14} /> Result
+              </span>
+              {lastRun && (
+                <button type="button" className="btn btn-ghost btn-sm" onClick={clearLastResult} style={{ color: 'var(--red)' }}>
+                  <Trash2 size={12} /> Clear
+                </button>
+              )}
+            </div>
+            <div className="card-body">
+              {!lastRun && !running && (
+                <p style={{ fontSize: 13, color: 'var(--mid)', margin: 0 }}>
+                  No run yet. Choose an option above to generate or schedule a timetable.
+                </p>
+              )}
+
+              <ResultPanel
+                result={lastRun}
+                mode="schedule"
+                loading={running}
+                precheckIssues={[]}
+                classes={classes}
+                teachers={teachers}
+                subjects={subjects}
+                genAt={genAt}
+              />
+
+              {lastSuccess && (
+                <div className="allotment-result-bar">
+                  {alreadyApplied ? (
+                    <>
+                      <button type="button" className="btn btn-primary" onClick={() => navigate('/timetable')}>
+                        <Calendar size={13} /> Open Timetable
+                      </button>
+                      <button type="button" className="btn btn-outline" onClick={openSummary}>
+                        <BarChart2 size={13} /> Teacher summary
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button type="button" className="btn btn-primary" onClick={applyTimetable} disabled={applying}>
+                        {applying
+                          ? <><Loader size={13} className="spinner" /> Applying…</>
+                          : <><Check size={13} /> Apply to Timetable</>}
+                      </button>
+                      <button type="button" className="btn btn-outline" onClick={openSummary}>
+                        <BarChart2 size={13} /> Preview summary
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
-          <p style={{ fontSize: 12, color: 'var(--mid)', marginTop: 8 }}>
-            <strong>Auto Allotment</strong> generates allocations, schedules them and applies the timetable in one step.
-            Use <strong>Schedule Saved Allocations</strong> to keep allocations you entered/edited manually.
-          </p>
-
-          <ResultPanel
-            result={lastRun}
-            mode="schedule"
-            loading={running}
-            precheckIssues={[]}
-            classes={classes}
-            teachers={teachers}
-            subjects={subjects}
-            genAt={genAt}
-          >
-            {lastRun?.success && (
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 16 }}>
-                <button type="button" className="btn btn-outline" onClick={openSummary}>
-                  <BarChart2 size={13} /> Teacher summary
-                </button>
-                <button type="button" className="btn btn-primary" onClick={applyTimetable} disabled={applying}>
-                  {applying ? <><Loader size={13} className="spinner" /> Applying…</> : <><Check size={13} /> Apply to Timetable</>}
-                </button>
-              </div>
-            )}
-          </ResultPanel>
         </div>
-      </div>
-    </div>
-  );
-}
 
-function RuleInfo({ label, hint }) {
-  return (
-    <div>
-      <div style={{ fontSize: 13, fontWeight: 600 }}>{label}</div>
-      <div style={{ fontSize: 11, color: 'var(--mid)', marginTop: 2 }}>{hint}</div>
+        {/* Sidebar */}
+        <aside className="allotment-sidebar">
+          <div className="card">
+            <div className="card-header">
+              <span style={{ fontWeight: 600, fontSize: 14 }}>Data check</span>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={loadState} title="Refresh">
+                <RefreshCw size={12} />
+              </button>
+            </div>
+            <div className="card-body" style={{ paddingTop: 8 }}>
+              {!validation ? (
+                <p style={{ fontSize: 13, color: 'var(--mid)', margin: 0 }}>Checking…</p>
+              ) : (
+                <ResultPanel precheckIssues={precheckIssues} mode="schedule" />
+              )}
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-body allotment-rules">
+              <details open>
+                <summary>Timetable rules (R1–R5)</summary>
+                <ul>
+                  <li><strong>R1</strong> — Class teacher at Period 1 in their class</li>
+                  <li><strong>R2</strong> — Diary last period (Classes 1–2)</li>
+                  <li><strong>R3</strong> — No teacher double-booked</li>
+                  <li><strong>R4</strong> — Teacher &quot;starts from&quot; period</li>
+                  <li><strong>R5</strong> — Max 2 same-subject periods per day</li>
+                </ul>
+              </details>
+            </div>
+          </div>
+        </aside>
+      </div>
     </div>
   );
 }

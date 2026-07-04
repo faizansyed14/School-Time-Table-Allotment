@@ -1,5 +1,5 @@
 -- ============================================================
--- School ERP — Database Schema (PostgreSQL)
+-- school TT allotment — Database Schema (PostgreSQL)
 -- Portable across Docker Postgres, AWS RDS and Supabase.
 -- Applied automatically on API startup (AUTO_INIT_DB=true),
 -- or run once manually: psql "$DATABASE_URL" -f database/schema.sql

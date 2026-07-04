@@ -34,7 +34,7 @@ async def lifespan(app: FastAPI):
     db.close_pool()
 
 
-app = FastAPI(title="School ERP API", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="school TT allotment API", version="2.0.0", lifespan=lifespan)
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
@@ -64,7 +64,7 @@ app.include_router(allocate.router, prefix="/api/allocate", tags=["allocate"])
 @app.get("/")
 async def root():
     return {
-        "service": "school-erp-api",
+        "service": "school-tt-allotment-api",
         "status": "ok",
         "health": "/api/health",
         "hint": "Use the static frontend site; API base is /api/...",

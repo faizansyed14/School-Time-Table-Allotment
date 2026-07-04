@@ -1,5 +1,5 @@
 # ============================================================
-# School ERP — PRODUCTION stack
+# school TT allotment — PRODUCTION stack
 # Run via: scripts/prod/start.sh   (uses .env.prod)
 # Services: db (Postgres) · api (FastAPI) · web (nginx)
 # ============================================================

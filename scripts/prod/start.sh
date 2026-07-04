@@ -9,7 +9,8 @@ ENV_FILE=".env.prod"
 COMPOSE_FILE="docker-compose.prod.yml"
 
 if [[ ! -f "$ENV_FILE" ]]; then
-  echo "Missing $ENV_FILE — copy and edit it first." >&2
+  echo "Missing $ENV_FILE — copy from .env.example and edit:" >&2
+  echo "  cp .env.example $ENV_FILE" >&2
   exit 1
 fi
 

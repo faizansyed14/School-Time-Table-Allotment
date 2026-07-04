@@ -3,7 +3,7 @@ import { checkAuthResponse } from './session.js';
 export function getToken() { return localStorage.getItem('erp_token') || ''; }
 function token() { return getToken(); }
 
-/** Render static site: VITE_API_URL=https://your-api.onrender.com (no trailing slash) */
+/** API base URL. Set VITE_API_URL at build time (no trailing slash); empty = same origin / dev proxy. */
 export function getApiBase() {
   const fromEnv = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
   if (fromEnv) return fromEnv;
@@ -22,7 +22,7 @@ export function apiUrl(path) {
 export function apiConfigError() {
   if (import.meta.env.DEV) return null;
   if (getApiBase()) return null;
-  return 'API URL not set. On Render static site add VITE_API_URL (your backend URL) and redeploy.';
+  return 'API URL not set. Set VITE_API_URL (your backend URL) at build time and rebuild.';
 }
 
 /** Fetch a fresh captcha (image + id). Called after the password is entered. */

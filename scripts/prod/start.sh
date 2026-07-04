@@ -18,7 +18,7 @@ if grep -q "CHANGE_ME" "$ENV_FILE"; then
   echo "⚠️  $ENV_FILE still contains CHANGE_ME placeholders — update secrets before going live." >&2
 fi
 
-echo "▶ Starting School ERP (production)…"
+echo "▶ Starting school TT allotment (production)…"
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --build
 
 echo ""

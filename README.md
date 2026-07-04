@@ -1,4 +1,4 @@
-# School ERP — AY 2026-27
+# school TT allotment — AY 2026-27
 
 Full-stack timetable management system for an Indian school.
 15 classes · 21 teachers · CP-SAT auto-allocation.

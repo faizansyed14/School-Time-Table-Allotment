@@ -189,30 +189,31 @@ def persist_allocations_and_targets(allocations, targets, name_to_teacher_id, wa
     if not allocations:
         return
 
-    db.execute(
-        "DELETE FROM subject_allocations WHERE teacher_id <> %s",
-        ["00000000-0000-0000-0000-000000000000"],
-    )
-
-    for a in allocations:
-        db.execute(
-            """INSERT INTO subject_allocations (teacher_id, class_id, subject, periods_weekly)
-               VALUES (%s, %s, %s, %s)
-               ON CONFLICT (teacher_id, class_id, subject)
-               DO UPDATE SET periods_weekly = EXCLUDED.periods_weekly""",
-            [a["teacher_id"], a["class_id"], a["subject"], a["periods_weekly"]],
+    with db.get_cursor() as cur:
+        cur.execute(
+            "DELETE FROM subject_allocations WHERE teacher_id <> %s",
+            ["00000000-0000-0000-0000-000000000000"],
         )
 
-    if targets and isinstance(targets, dict):
-        for name, target in targets.items():
-            tid = name_to_teacher_id.get(name)
-            if not tid:
-                continue
-            fixed = was_fixed_by_name.get(name) is True
-            db.execute(
-                "UPDATE teachers SET allocated_periods = %s, allotted_periods = %s WHERE id = %s",
-                [target, target if fixed else 0, tid],
+        for a in allocations:
+            cur.execute(
+                """INSERT INTO subject_allocations (teacher_id, class_id, subject, periods_weekly)
+                   VALUES (%s, %s, %s, %s)
+                   ON CONFLICT (teacher_id, class_id, subject)
+                   DO UPDATE SET periods_weekly = EXCLUDED.periods_weekly""",
+                [a["teacher_id"], a["class_id"], a["subject"], a["periods_weekly"]],
             )
+
+        if targets and isinstance(targets, dict):
+            for name, target in targets.items():
+                tid = name_to_teacher_id.get(name)
+                if not tid:
+                    continue
+                fixed = was_fixed_by_name.get(name) is True
+                cur.execute(
+                    "UPDATE teachers SET allocated_periods = %s, allotted_periods = %s WHERE id = %s",
+                    [target, target if fixed else 0, tid],
+                )
 
 
 def transform_solver_result(raw, teachers, classes):
